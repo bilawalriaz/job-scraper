@@ -771,6 +771,140 @@ def get_console_logs():
         return jsonify(log_buffer[-50:])  # Return last 50 logs
 
 
+@app.route('/api/refresh-descriptions', methods=['POST'])
+@async_wrapper
+async def api_refresh_descriptions():
+    """
+    API: Refresh job descriptions for partial listings.
+    Fetches full descriptions from original job URLs.
+    """
+    db = get_db()
+    data = request.get_json() or {}
+    source = data.get('source')  # Filter by source (e.g., 'totaljobs')
+    limit = int(data.get('limit', 50))  # Max number of jobs to refresh
+    job_id = data.get('job_id')  # Refresh a specific job by ID
+
+    app_logger.info(f"Description refresh requested (source: {source}, limit: {limit}, job_id: {job_id})")
+
+    # Check rate limiting
+    if source:
+        rate_status = db.get_rate_limit_status().get(source, {})
+        if rate_status.get('limited', False):
+            app_logger.warning(f"Rate limited for {source}")
+            return jsonify({
+                'success': False,
+                'error': f'Rate limited for {source}. Please try again later.'
+            }), 429
+
+    # Get jobs to refresh
+    jobs_to_refresh = []
+
+    if job_id:
+        # Refresh a specific job
+        job_dict = db.get_job(int(job_id))
+        if not job_dict:
+            return jsonify({'success': False, 'error': 'Job not found'}), 404
+        jobs_to_refresh.append(JobListing(
+            title=job_dict['title'],
+            company=job_dict['company'],
+            location=job_dict['location'],
+            description=job_dict['description'],
+            url=job_dict['url'],
+            source=job_dict['source'],
+            scraped_at=job_dict['scraped_at'],
+            employment_type=job_dict.get('employment_type')
+        ))
+    else:
+        # Get all jobs needing full descriptions
+        jobs_to_refresh = db.get_jobs_needing_descriptions(limit=limit, source=source)
+
+    if not jobs_to_refresh:
+        return jsonify({
+            'success': True,
+            'message': 'No jobs need refreshing',
+            'updated': 0
+        })
+
+    app_logger.info(f"Refreshing {len(jobs_to_refresh)} job descriptions...")
+
+    # Determine which scraper to use based on source
+    source_to_refresh = source or jobs_to_refresh[0].source
+    scraper_class = AVAILABLE_SCRAPERS.get(source_to_refresh)
+
+    if not scraper_class:
+        app_logger.error(f"No scraper available for source: {source_to_refresh}")
+        return jsonify({
+            'success': False,
+            'error': f'No scraper available for source: {source_to_refresh}'
+        }), 400
+
+    scraper = None
+    updated_count = 0
+    failed_count = 0
+
+    try:
+        scraper = scraper_class(db, headless=True)
+        app_logger.info(f"Initializing {source_to_refresh} scraper...")
+        await scraper.init_browser()
+
+        # Check if scraper has fetch_full_descriptions method
+        if not hasattr(scraper, 'fetch_full_descriptions'):
+            app_logger.error(f"Scraper for {source_to_refresh} doesn't support fetching full descriptions")
+            return jsonify({
+                'success': False,
+                'error': f'Scraper for {source_to_refresh} does not support description refresh'
+            }), 400
+
+        # Fetch full descriptions
+        updated_jobs = await scraper.fetch_full_descriptions(jobs_to_refresh)
+
+        # Update descriptions in database
+        for job in updated_jobs:
+            # Find job ID by matching URL
+            cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
+            row = cursor.fetchone()
+            if row:
+                success = db.update_job_description(row['id'], job.description, mark_full=True)
+                if success:
+                    updated_count += 1
+                else:
+                    failed_count += 1
+            else:
+                failed_count += 1
+                app_logger.warning(f"Could not find job in database with URL: {job.url}")
+
+        app_logger.info(f"Refresh complete: {updated_count} updated, {failed_count} failed")
+
+        return jsonify({
+            'success': True,
+            'updated': updated_count,
+            'failed': failed_count,
+            'message': f'Refreshed {updated_count} job descriptions'
+        })
+
+    except Exception as e:
+        app_logger.error(f"Failed to refresh descriptions: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+    finally:
+        if scraper:
+            app_logger.info("Cleaning up scraper...")
+            await scraper.cleanup()
+
+
+@app.route('/api/jobs/refresh-status', methods=['GET'])
+def api_refresh_status():
+    """
+    API: Get count of jobs needing full descriptions by source.
+    Useful for showing a refresh button or badge in the UI.
+    """
+    db = get_db()
+    partial_counts = db.get_partial_description_count()
+    return jsonify(partial_counts)
+
+
 # React Frontend Serving
 # These routes serve the built React app for all non-API routes
 @app.route('/', defaults={'path': ''})

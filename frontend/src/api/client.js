@@ -135,3 +135,20 @@ export function streamConsoleLogs(onMessage, onError) {
     // Return cleanup function
     return () => eventSource.close();
 }
+
+/**
+ * Refresh job descriptions for partial listings
+ */
+export async function refreshDescriptions(options = {}) {
+    return fetchAPI('/refresh-descriptions', {
+        method: 'POST',
+        body: JSON.stringify(options),
+    });
+}
+
+/**
+ * Get count of jobs needing full descriptions by source
+ */
+export async function getRefreshStatus() {
+    return fetchAPI('/jobs/refresh-status');
+}

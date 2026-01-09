@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { getStats, getJobs, getConfigs, runScraper, getRateLimitStatus, resetRateLimit } from '../api/client';
+import { getStats, getJobs, getConfigs, runScraper, getRateLimitStatus, resetRateLimit, refreshDescriptions, getRefreshStatus } from '../api/client';
 import { Card, CardHeader, CardBody } from '../components/Card';
 import Button from '../components/Button';
 import Console from '../components/Console';
 import Spinner from '../components/Spinner';
 import { StatusBadge } from '../components/StatusBadge';
-import { PlayIcon, BriefcaseIcon, LocationIcon, DollarIcon, SearchIcon, UserIcon, RefreshIcon } from '../components/Icons';
+import { PlayIcon, BriefcaseIcon, LocationIcon, DollarIcon, SearchIcon, UserIcon, RefreshIcon, DownloadIcon } from '../components/Icons';
 
 function Dashboard() {
     const [stats, setStats] = useState(null);
@@ -17,19 +17,24 @@ function Dashboard() {
     const [scrapeResult, setScrapeResult] = useState(null);
     const [rateLimitStatus, setRateLimitStatus] = useState(null);
     const [resettingRateLimit, setResettingRateLimit] = useState(false);
+    const [refreshStatus, setRefreshStatus] = useState(null);
+    const [refreshing, setRefreshing] = useState(false);
+    const [refreshResult, setRefreshResult] = useState(null);
 
     const loadData = useCallback(async () => {
         try {
-            const [statsData, jobsData, configsData, rateLimitData] = await Promise.all([
+            const [statsData, jobsData, configsData, rateLimitData, refreshData] = await Promise.all([
                 getStats(),
                 getJobs({ per_page: 10 }),
                 getConfigs(),
-                getRateLimitStatus()
+                getRateLimitStatus(),
+                getRefreshStatus()
             ]);
             setStats(statsData);
             setRecentJobs(jobsData.jobs || []);
             setConfigs(configsData.configs || []);
             setRateLimitStatus(rateLimitData);
+            setRefreshStatus(refreshData);
         } catch (error) {
             console.error('Failed to load dashboard data:', error);
         } finally {
@@ -43,7 +48,8 @@ function Dashboard() {
         const interval = setInterval(() => {
             Promise.all([
                 getStats().then(setStats),
-                getRateLimitStatus().then(setRateLimitStatus)
+                getRateLimitStatus().then(setRateLimitStatus),
+                getRefreshStatus().then(setRefreshStatus)
             ]).catch(console.error);
         }, 5000);
         return () => clearInterval(interval);
@@ -76,8 +82,26 @@ function Dashboard() {
         }
     };
 
+    const handleRefreshDescriptions = async () => {
+        setRefreshing(true);
+        setRefreshResult(null);
+        try {
+            const result = await refreshDescriptions({ limit: 50 });
+            setRefreshResult(result);
+            // Reload data after refresh
+            loadData();
+        } catch (error) {
+            setRefreshResult({ error: error.message });
+        } finally {
+            setRefreshing(false);
+        }
+    };
+
     // Check if any source is rate limited
     const isAnyRateLimited = rateLimitStatus && Object.values(rateLimitStatus).some(s => s.limited);
+
+    // Count of jobs needing full descriptions
+    const partialCount = refreshStatus?.total || 0;
 
     if (loading) {
         return (
@@ -95,10 +119,24 @@ function Dashboard() {
                     <h1 className="page-title">Dashboard</h1>
                     <p className="page-subtitle">Monitor your job search activity</p>
                 </div>
-                <Button variant="primary" onClick={handleRunScraper} loading={scraping} disabled={scraping}>
-                    <PlayIcon />
-                    Run Scraper
-                </Button>
+                <div className="page-header-actions">
+                    {partialCount > 0 && (
+                        <Button
+                            variant="secondary"
+                            onClick={handleRefreshDescriptions}
+                            loading={refreshing}
+                            disabled={refreshing}
+                            style={{ marginRight: '8px' }}
+                        >
+                            <DownloadIcon />
+                            Refresh {partialCount} Partial {partialCount === 1 ? 'Description' : 'Descriptions'}
+                        </Button>
+                    )}
+                    <Button variant="primary" onClick={handleRunScraper} loading={scraping} disabled={scraping}>
+                        <PlayIcon />
+                        Run Scraper
+                    </Button>
+                </div>
             </div>
 
             {/* Scrape Result */}
@@ -108,6 +146,17 @@ function Dashboard() {
                         `Error: ${scrapeResult.error}`
                     ) : (
                         `Scraping complete! Found ${scrapeResult.total_found || 0} jobs, added ${scrapeResult.total_added || 0} new jobs.`
+                    )}
+                </div>
+            )}
+
+            {/* Refresh Result */}
+            {refreshResult && (
+                <div className={`alert ${refreshResult.error ? 'alert-error' : 'alert-success'}`}>
+                    {refreshResult.error ? (
+                        `Error: ${refreshResult.error}`
+                    ) : (
+                        `Refresh complete! Updated ${refreshResult.updated || 0} job descriptions${refreshResult.failed > 0 ? ` (${refreshResult.failed} failed)` : ''}.`
                     )}
                 </div>
             )}

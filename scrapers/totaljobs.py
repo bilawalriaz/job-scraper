@@ -280,6 +280,138 @@ class TotalJobsScraper(BaseScraper):
 class TotalJobsDetailedScraper(TotalJobsScraper):
     """Enhanced scraper that navigates to each job page for full details."""
 
+    async def _dismiss_overlays(self) -> bool:
+        """
+        Dismiss cookie consent and login modals that block job description access.
+        Returns True if any overlay was dismissed.
+        """
+        dismissed_any = False
+
+        # List of selectors for cookie consent buttons (common patterns)
+        cookie_selectors = [
+            'button:has-text("Accept")',
+            'button:has-text("Accept All")',
+            'button:has-text("I Agree")',
+            'button:has-text("Accept Cookies")',
+            'button:has-text("Continue")',
+            '#onetrust-accept-btn-handler',
+            '.accept-cookies',
+            '[data-testid="cookie-accept"]',
+            'button[aria-label="Accept cookies"]',
+        ]
+
+        # Try to dismiss cookie banner
+        for selector in cookie_selectors:
+            try:
+                button = await self.page.query_selector(selector)
+                if button:
+                    # Check if button is visible
+                    is_visible = await button.is_visible()
+                    if is_visible:
+                        logger.info(f"Dismissing cookie banner with selector: {selector}")
+                        await button.click(timeout=3000)
+                        await self.random_delay(0.5, 1.0)
+                        dismissed_any = True
+                        break
+            except:
+                continue
+
+        # Wait a bit for any animations
+        await self.random_delay(0.5, 1.0)
+
+        # List of selectors for close buttons on modals/popups
+        close_selectors = [
+            'button[aria-label="Close"]',
+            'button[aria-label="close"]',
+            'button.close',
+            'button.modal-close',
+            '.close-button',
+            '[data-testid="close"]',
+            'button:has-text("Close")',
+            'button:has-text("×")',
+            'button:has-text("✕")',
+            '.modal button[aria-label*="close"]',
+            'dialog button[aria-label="close"]',
+        ]
+
+        # Try to close login modal or other overlays
+        for selector in close_selectors:
+            try:
+                button = await self.page.query_selector(selector)
+                if button:
+                    is_visible = await button.is_visible()
+                    if is_visible:
+                        logger.info(f"Closing modal with selector: {selector}")
+                        await button.click(timeout=3000)
+                        await self.random_delay(0.5, 1.0)
+                        dismissed_any = True
+                        break
+            except:
+                continue
+
+        # Also try pressing Escape key to close modals
+        try:
+            # Look for any modal/dialog overlay
+            has_modal = await self.page.query_selector('.modal, dialog, [role="dialog"], .overlay')
+            if has_modal:
+                logger.info("Pressing Escape to close modal")
+                await self.page.keyboard.press('Escape')
+                await self.random_delay(0.5, 1.0)
+                dismissed_any = True
+        except:
+            pass
+
+        if dismissed_any:
+            # Wait for overlays to disappear
+            await self.random_delay(1.0, 1.5)
+
+        return dismissed_any
+
+    async def _get_job_description_from_page(self) -> Optional[str]:
+        """
+        Extract job description from a job detail page.
+        Tries multiple selectors to handle different page layouts and obfuscated class names.
+        """
+        # First, dismiss any overlays that might be blocking the content
+        await self._dismiss_overlays()
+
+        # Try multiple selectors in order of preference
+        selectors = [
+            '[data-at="job-description"]',  # Standard selector
+            '[data-genesis-element="TEXT"]',  # Obfuscated class names
+            'span[data-genesis-element="TEXT"]',  # More specific
+        ]
+
+        # Also try by class pattern (job-ad-display-*)
+        try:
+            elements = await self.page.query_selector_all('[class*="job-ad-display"]')
+            if elements:
+                # Look for the largest text block (likely the description)
+                largest_elem = None
+                largest_text = ""
+                for elem in elements:
+                    text = await elem.inner_text()
+                    if len(text) > len(largest_text):
+                        largest_text = text
+                        largest_elem = elem
+                if largest_elem and len(largest_text) > 200:  # Reasonable description length
+                    return largest_text
+        except:
+            pass
+
+        # Try standard selectors
+        for selector in selectors:
+            try:
+                elem = await self.page.query_selector(selector)
+                if elem:
+                    text = await elem.inner_text()
+                    if text and len(text) > 50:  # Minimum reasonable description length
+                        return text
+            except:
+                continue
+
+        return None
+
     async def search_jobs(self,
                          search_term: str,
                          location: str = "London",
@@ -330,11 +462,18 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
                 logger.info(f"[{i+1}/{min(len(jobs), max_jobs)}] Fetching: {job.title}")
 
                 if await self.navigate_with_retry(job.url):
-                    await self.page.wait_for_selector('[data-at="job-description"]', timeout=8000)
+                    # Wait for page to load - look for any content element
+                    try:
+                        await self.page.wait_for_selector('body', timeout=5000)
+                    except:
+                        pass
 
-                    desc_elem = await self.page.query_selector('[data-at="job-description"]')
-                    if desc_elem:
-                        job.description = await desc_elem.inner_text()
+                    description = await self._get_job_description_from_page()
+                    if description:
+                        job.description = description
+                        logger.info(f"Got description ({len(description)} chars)")
+                    else:
+                        logger.warning(f"Could not extract description for {job.title}")
 
                     detailed_jobs.append(job)
                     await self.random_delay(2, 4)
@@ -368,14 +507,18 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
                 logger.info(f"[{i+1}/{len(jobs)}] Fetching: {job.title}")
 
                 if await self.navigate_with_retry(job.url):
-                    await self.page.wait_for_selector('[data-at="job-description"]', timeout=8000)
+                    # Wait for page to load
+                    try:
+                        await self.page.wait_for_selector('body', timeout=5000)
+                    except:
+                        pass
 
-                    desc_elem = await self.page.query_selector('[data-at="job-description"]')
-                    if desc_elem:
-                        job.description = await desc_elem.inner_text()
-                        logger.info(f"Updated description for {job.title} ({len(job.description)} chars)")
+                    description = await self._get_job_description_from_page()
+                    if description:
+                        job.description = description
+                        logger.info(f"Updated description for {job.title} ({len(description)} chars)")
                     else:
-                        logger.warning(f"No description element found for {job.title}")
+                        logger.warning(f"Could not extract description for {job.title}")
 
                     await self.random_delay(1, 2)  # Shorter delay for second pass
 
