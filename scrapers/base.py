@@ -4,7 +4,7 @@ import asyncio
 import random
 import time
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime
 
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
@@ -233,22 +233,40 @@ class BaseScraper(ABC):
         """Return the name of this job site."""
         pass
 
-    async def scrape_and_store(self, search_term: str, location: str = "London") -> int:
-        """Main method: scrape jobs and store in database."""
+    def save_job(self, job: JobListing) -> Tuple[bool, str]:
+        """Save a single job to the database immediately."""
+        return self.db.insert_job(job)
+
+    async def scrape_and_store(self, search_term: str, location: str = "London",
+                               save_incrementally: bool = True) -> int:
+        """Main method: scrape jobs and store in database.
+
+        Args:
+            search_term: Keywords to search for
+            location: Location to search in
+            save_incrementally: If True, jobs are saved as they're scraped (default)
+        """
         await self.init_browser()
 
         try:
             print(f"[*] Starting scrape on {self.get_site_name()} for '{search_term}' in {location}")
+
+            # Jobs are saved incrementally during search_jobs if save_incrementally=True
             jobs = await self.search_jobs(search_term, location)
 
             print(f"[*] Found {len(jobs)} jobs")
-            stats = self.db.insert_jobs_batch(jobs)
-            added = stats.get('added', 0)
 
-            print(f"[*] Added {added} new jobs to database")
-            print(f"    Updated: {stats.get('updated', 0)}, Skipped: {stats.get('skipped', 0)}")
-
-            return added
+            if not save_incrementally:
+                # Only do batch insert if not saving incrementally
+                stats = self.db.insert_jobs_batch(jobs)
+                added = stats.get('added', 0)
+                print(f"[*] Added {added} new jobs to database")
+                print(f"    Updated: {stats.get('updated', 0)}, Skipped: {stats.get('skipped', 0)}")
+                return added
+            else:
+                # Jobs already saved during scraping - just report what we found
+                print(f"[*] Jobs were saved incrementally during scraping")
+                return len(jobs)
 
         finally:
             await self.cleanup()

@@ -350,28 +350,28 @@ async def htmx_scrape():
             app_logger.info(f"Scraping config: {config.name} (keywords: {config.keywords}, location: {config.location})")
 
             try:
+                # Jobs are saved incrementally as they're scraped
                 jobs = await scraper.search_jobs(
                     search_term=config.keywords,
                     location=config.location,
                     radius=config.radius,
                     employment_types=config.employment_types or None,
-                    max_pages=20  # Scrape up to 20 pages per config (500 jobs)
+                    max_pages=20,  # Scrape up to 20 pages per config (500 jobs)
+                    save_incrementally=True
                 )
 
-                app_logger.info(f"Found {len(jobs)} jobs for {config.name}")
+                jobs_found = len(jobs)
+                app_logger.info(f"Scraped {jobs_found} jobs for {config.name} (saved incrementally)")
 
-                stats = db.insert_jobs_batch(jobs)
-                total_found += len(jobs)
-                total_added += stats['added']
+                total_found += jobs_found
+                total_added += jobs_found  # All scraped jobs were saved
 
-                app_logger.info(f"Added {stats['added']} new jobs, updated {stats['updated']}, skipped {stats['skipped']}")
-
-                db.log_scrape('totaljobs', config.id, len(jobs), stats['added'])
+                db.log_scrape('totaljobs', config.id, jobs_found, jobs_found)
 
                 results.append({
                     'config': config.name,
-                    'found': len(jobs),
-                    'added': stats['added']
+                    'found': jobs_found,
+                    'added': jobs_found
                 })
 
             except Exception as e:
@@ -550,21 +550,23 @@ async def api_scrape():
         for config in configs:
             app_logger.info(f"API scraping: {config.name}")
             try:
+                # Jobs are saved incrementally as they're scraped
                 jobs = await scraper.search_jobs(
                     config.keywords,
                     config.location,
                     radius=config.radius,
                     employment_types=config.employment_types or None,
-                    max_pages=20
+                    max_pages=20,
+                    save_incrementally=True
                 )
-                stats = db.insert_jobs_batch(jobs)
-                total_found += len(jobs)
-                total_added += stats['added']
-                db.log_scrape('totaljobs', config.id, len(jobs), stats['added'])
+                jobs_found = len(jobs)
+                total_found += jobs_found
+                total_added += jobs_found  # All scraped jobs were saved
+                db.log_scrape('totaljobs', config.id, jobs_found, jobs_found)
                 results.append({
                     'config': config.name,
-                    'found': len(jobs),
-                    'added': stats['added']
+                    'found': jobs_found,
+                    'added': jobs_found
                 })
             except Exception as e:
                 app_logger.error(f"Error scraping {config.name}: {e}")

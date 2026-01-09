@@ -45,7 +45,8 @@ class TotalJobsScraper(BaseScraper):
                          location: str = "London",
                          radius: int = 10,
                          employment_types: Optional[str] = None,
-                         max_pages: int = 5) -> List[JobListing]:
+                         max_pages: int = 5,
+                         save_incrementally: bool = True) -> List[JobListing]:
         """
         Search for jobs on TotalJobs with pagination support.
 
@@ -55,8 +56,10 @@ class TotalJobsScraper(BaseScraper):
             radius: Search radius in miles (max 30)
             employment_types: Comma-separated employment types (e.g., "contract,permanent,whf")
             max_pages: Maximum number of pages to scrape
+            save_incrementally: If True, save each job to DB as it's scraped
         """
         jobs = []
+        stats = {'added': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
 
         # Cap radius at 30 miles (site limitation)
         radius = min(radius, 30)
@@ -109,9 +112,25 @@ class TotalJobsScraper(BaseScraper):
                     job_data = await self._extract_job_data(card)
                     if job_data:
                         jobs.append(job_data)
+                        # Save immediately if incremental saving is enabled
+                        if save_incrementally:
+                            success, message = self.save_job(job_data)
+                            if 'Added' in message:
+                                stats['added'] += 1
+                                logger.info(f"Saved: {job_data.title} at {job_data.company}")
+                            elif 'Updated' in message:
+                                stats['updated'] += 1
+                            elif 'Skipped' in message or 'Duplicate' in message:
+                                stats['skipped'] += 1
+                            else:
+                                stats['errors'] += 1
                 except Exception as e:
                     logger.error(f"Error extracting job: {e}")
                     continue
+
+            # Log progress after each page
+            if save_incrementally:
+                logger.info(f"Page {page_num} complete - Total: {len(jobs)} scraped, {stats['added']} added, {stats['skipped']} skipped")
 
             # Check if there's a next page button - try multiple selectors
             next_button = (
@@ -177,6 +196,8 @@ class TotalJobsScraper(BaseScraper):
                 break
 
         logger.info(f"Total jobs scraped: {len(jobs)}")
+        if save_incrementally:
+            logger.info(f"Final stats - Added: {stats['added']}, Updated: {stats['updated']}, Skipped: {stats['skipped']}")
         return jobs
 
     async def _extract_job_data(self, card) -> JobListing:
@@ -266,7 +287,8 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
                          employment_types: Optional[str] = None,
                          max_jobs: int = 100,
                          max_pages: int = 5,
-                         detailed: bool = False) -> List[JobListing]:
+                         detailed: bool = False,
+                         save_incrementally: bool = True) -> List[JobListing]:
         """
         Search with option to fetch full job details.
 
@@ -278,14 +300,16 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
             max_jobs: Maximum number of jobs to return
             max_pages: Maximum number of pages to scrape
             detailed: Whether to fetch full descriptions
+            save_incrementally: If True, save each job to DB as it's scraped
         """
-        # First get all basic listings with pagination
+        # First get all basic listings with pagination (saves incrementally)
         jobs = await super().search_jobs(
             search_term=search_term,
             location=location,
             radius=radius,
             employment_types=employment_types,
-            max_pages=max_pages
+            max_pages=max_pages,
+            save_incrementally=save_incrementally
         )
 
         logger.info(f"Found {len(jobs)} jobs across all pages")

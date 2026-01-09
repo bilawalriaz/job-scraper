@@ -167,23 +167,17 @@ class JobDatabase:
         ]
 
         for config_data in default_configs:
-            # Check if config already exists
-            existing = self.conn.execute(
-                "SELECT id FROM search_configs WHERE name = ?",
-                (config_data['name'],)
-            ).fetchone()
-
-            if not existing:
-                self.conn.execute("""
-                    INSERT INTO search_configs (name, keywords, location, radius, employment_types, enabled)
-                    VALUES (?, ?, ?, ?, ?, 1)
-                """, (
-                    config_data['name'],
-                    config_data['keywords'],
-                    config_data['location'],
-                    config_data['radius'],
-                    config_data['employment_types']
-                ))
+            # Use INSERT OR IGNORE to atomically handle duplicates
+            self.conn.execute("""
+                INSERT OR IGNORE INTO search_configs (name, keywords, location, radius, employment_types, enabled)
+                VALUES (?, ?, ?, ?, ?, 1)
+            """, (
+                config_data['name'],
+                config_data['keywords'],
+                config_data['location'],
+                config_data['radius'],
+                config_data['employment_types']
+            ))
 
         self.conn.commit()
 
