@@ -23,7 +23,8 @@ class TotalJobsScraper(BaseScraper):
         'contract': 'contract',
         'temp': 'temporary',
         'temporary': 'temporary',
-        'whf': 'whf',
+        'whf': 'whf',           # TotalJobs uses 'whf' not 'wfh'
+        'wfh': 'whf',           # Standard alias maps to TotalJobs 'whf'
         'work from home': 'whf',
         'remote': 'whf',
         'home': 'whf',

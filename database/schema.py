@@ -152,12 +152,12 @@ class JobDatabase:
     def _create_default_configs(self):
         """Create default search configurations if they don't exist."""
         default_configs = [
-            # Remote searches (contract, permanent, WHF)
-            {'name': 'Python AI - Remote', 'keywords': 'python ai', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,whf'},
-            {'name': 'Azure AI - Remote', 'keywords': 'azure ai', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,whf'},
-            {'name': 'Azure DevOps - Remote', 'keywords': 'azure devops', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,whf'},
-            {'name': 'Python DevOps - Remote', 'keywords': 'python devops', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,whf'},
-            {'name': 'AI DevOps - Remote', 'keywords': 'ai devops', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,whf'},
+            # Remote searches (contract, permanent, WFH)
+            {'name': 'Python AI - Remote', 'keywords': 'python ai', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,wfh'},
+            {'name': 'Azure AI - Remote', 'keywords': 'azure ai', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,wfh'},
+            {'name': 'Azure DevOps - Remote', 'keywords': 'azure devops', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,wfh'},
+            {'name': 'Python DevOps - Remote', 'keywords': 'python devops', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,wfh'},
+            {'name': 'AI DevOps - Remote', 'keywords': 'ai devops', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,wfh'},
             # Manchester searches (contract, permanent only, 10 miles)
             {'name': 'Python AI - Manchester', 'keywords': 'python ai', 'location': 'Manchester', 'radius': 10, 'employment_types': 'contract,permanent'},
             {'name': 'Azure AI - Manchester', 'keywords': 'azure ai', 'location': 'Manchester', 'radius': 10, 'employment_types': 'contract,permanent'},
