@@ -45,9 +45,6 @@ open http://localhost:5000
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Install Playwright browsers
-playwright install chromium
-
 # Run the application
 python api/app.py
 
@@ -223,7 +220,6 @@ class IndeedScraper(BaseScraper):
 ```bash
 # Install dependencies
 pip install -r requirements.txt
-playwright install chromium
 
 # Run with debug mode
 FLASK_DEBUG=1 python api/app.py

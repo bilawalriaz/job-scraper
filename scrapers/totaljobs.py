@@ -140,18 +140,39 @@ class TotalJobsScraper(BaseScraper):
                 await next_button.scroll_into_view_if_needed()
                 await self.random_delay(0.5, 1)
 
-                # Click the button
-                await next_button.click()
+                # Get the href before clicking (fallback if click doesn't trigger nav)
+                next_href = await next_button.get_attribute('href')
 
-                # Human-like delay for page load (don't use networkidle - it times out)
-                await self.random_delay(3, 4)
+                # Try clicking the button first
+                try:
+                    await next_button.click(force=True, timeout=5000)
+                    # Wait for navigation to complete
+                    await self.page.wait_for_load_state('domcontentloaded', timeout=10000)
+                except Exception as click_error:
+                    # Click failed, try direct URL navigation
+                    logger.info(f"Click failed ({click_error}), trying direct URL navigation")
+                    if next_href:
+                        if next_href.startswith('http'):
+                            await self.page.goto(next_href, wait_until='domcontentloaded', timeout=15000)
+                        else:
+                            await self.page.goto(f"{self.BASE_URL}{next_href}", wait_until='domcontentloaded', timeout=15000)
+                    else:
+                        raise
 
                 # Wait for job cards to appear (confirmation of page load)
-                await self.page.wait_for_selector('[data-at="job-item"]', timeout=20000)
+                await self.page.wait_for_selector('[data-at="job-item"]', timeout=15000)
 
                 logger.info(f"Successfully navigated to page {page_num + 1}")
             except Exception as e:
-                logger.warning(f"Failed to click next button: {e}")
+                error_msg = str(e)
+                # Check for transient network errors that shouldn't stop pagination
+                transient_errors = ['HTTP2_PROTOCOL_ERROR', 'ERR_CONNECTION_', 'ERR_NETWORK_', 'net::']
+                is_transient = any(err in error_msg for err in transient_errors)
+                if is_transient:
+                    logger.warning(f"Transient network error on page {page_num + 1}: {e}")
+                    logger.info("Stopping pagination due to network issues (not a pagination bug)")
+                else:
+                    logger.warning(f"Failed to navigate to page {page_num + 1}: {e}")
                 break
 
         logger.info(f"Total jobs scraped: {len(jobs)}")

@@ -7,8 +7,8 @@ requests==2.31.0
 # Async Support
 asyncio==3.4.3
 
-# Playwright for Browser Automation
-playwright==1.40.0
+# Web Scraping
+playwright==1.48.0
 
 # Database (built-in sqlite3)
 
