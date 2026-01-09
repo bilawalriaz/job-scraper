@@ -146,6 +146,47 @@ class JobDatabase:
 
         self.conn.commit()
 
+        # Create default search configurations
+        self._create_default_configs()
+
+    def _create_default_configs(self):
+        """Create default search configurations if they don't exist."""
+        default_configs = [
+            # Remote searches (contract, permanent, WHF)
+            {'name': 'Python AI - Remote', 'keywords': 'python ai', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,whf'},
+            {'name': 'Azure AI - Remote', 'keywords': 'azure ai', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,whf'},
+            {'name': 'Azure DevOps - Remote', 'keywords': 'azure devops', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,whf'},
+            {'name': 'Python DevOps - Remote', 'keywords': 'python devops', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,whf'},
+            {'name': 'AI DevOps - Remote', 'keywords': 'ai devops', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,whf'},
+            # Manchester searches (contract, permanent only, 10 miles)
+            {'name': 'Python AI - Manchester', 'keywords': 'python ai', 'location': 'Manchester', 'radius': 10, 'employment_types': 'contract,permanent'},
+            {'name': 'Azure AI - Manchester', 'keywords': 'azure ai', 'location': 'Manchester', 'radius': 10, 'employment_types': 'contract,permanent'},
+            {'name': 'Azure DevOps - Manchester', 'keywords': 'azure devops', 'location': 'Manchester', 'radius': 10, 'employment_types': 'contract,permanent'},
+            {'name': 'Python DevOps - Manchester', 'keywords': 'python devops', 'location': 'Manchester', 'radius': 10, 'employment_types': 'contract,permanent'},
+            {'name': 'AI DevOps - Manchester', 'keywords': 'ai devops', 'location': 'Manchester', 'radius': 10, 'employment_types': 'contract,permanent'},
+        ]
+
+        for config_data in default_configs:
+            # Check if config already exists
+            existing = self.conn.execute(
+                "SELECT id FROM search_configs WHERE name = ?",
+                (config_data['name'],)
+            ).fetchone()
+
+            if not existing:
+                self.conn.execute("""
+                    INSERT INTO search_configs (name, keywords, location, radius, employment_types, enabled)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                """, (
+                    config_data['name'],
+                    config_data['keywords'],
+                    config_data['location'],
+                    config_data['radius'],
+                    config_data['employment_types']
+                ))
+
+        self.conn.commit()
+
     def _similarity_score(self, str1: str, str2: str) -> float:
         """Calculate string similarity score (0-1)."""
         # Normalize strings
