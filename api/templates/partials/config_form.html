@@ -22,16 +22,53 @@
             <label class="form-label" for="location">Location</label>
             <input type="text" class="form-control" id="location" name="location" value="{{ config.location if config else '' }}" required placeholder="London, Remote, Manchester">
         </div>
-        <div class="d-flex gap-3">
-            <div class="mb-4" style="flex: 1;">
-                <label class="form-label" for="radius">Radius (miles)</label>
-                <input type="number" class="form-control" id="radius" name="radius" value="{{ config.radius if config else 10 }}" min="0" max="100">
+        <div class="mb-4">
+            <label class="form-label" for="radius">Radius (miles)</label>
+            <input type="number" class="form-control" id="radius" name="radius" value="{{ config.radius if config else 10 }}" min="0" max="30" required>
+            <p class="text-muted small" style="margin-top: 6px;">Max 30 miles (site limitation)</p>
+        </div>
+        <div class="mb-4">
+            <label class="form-label">Employment Types</label>
+            <div class="employment-tags" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
+                <label class="employment-tag" style="cursor: pointer;">
+                    <input type="checkbox" name="employment_type_tags" value="permanent" style="display: none;">
+                    <span class="tag" style="
+                        display: inline-block;
+                        padding: 6px 12px;
+                        background: var(--bg-color);
+                        border: 1px solid var(--border-color);
+                        border-radius: 20px;
+                        font-size: 0.875rem;
+                        transition: all 0.2s;
+                    ">Permanent</span>
+                </label>
+                <label class="employment-tag" style="cursor: pointer;">
+                    <input type="checkbox" name="employment_type_tags" value="contract" style="display: none;">
+                    <span class="tag" style="
+                        display: inline-block;
+                        padding: 6px 12px;
+                        background: var(--bg-color);
+                        border: 1px solid var(--border-color);
+                        border-radius: 20px;
+                        font-size: 0.875rem;
+                        transition: all 0.2s;
+                    ">Contract</span>
+                </label>
+                <label class="employment-tag" style="cursor: pointer;">
+                    <input type="checkbox" name="employment_type_tags" value="whf" style="display: none;">
+                    <span class="tag" style="
+                        display: inline-block;
+                        padding: 6px 12px;
+                        background: var(--bg-color);
+                        border: 1px solid var(--border-color);
+                        border-radius: 20px;
+                        font-size: 0.875rem;
+                        transition: all 0.2s;
+                    ">Work From Home</span>
+                </label>
             </div>
-            <div class="mb-4" style="flex: 2;">
-                <label class="form-label" for="employment_types">Employment Types</label>
-                <input type="text" class="form-control" id="employment_types" name="employment_types" value="{{ config.employment_types if config else '' }}" placeholder="permanent,contract,whf">
-                <p class="text-muted small" style="margin-top: 6px;">Optional: comma-separated</p>
-            </div>
+            <input type="hidden" id="employment_types" name="employment_types" value="{{ config.employment_types if config else '' }}">
+            <p class="text-muted small" style="margin-top: 6px;">Select one or more types to filter</p>
         </div>
         <div class="mb-4">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
@@ -51,14 +88,36 @@
     </div>
 </form>
 
+<style>
+.employment-tag input:checked + .tag {
+    background: var(--primary-color, #f97316);
+    color: white;
+    border-color: var(--primary-color, #f97316);
+}
+
+.employment-tag:hover .tag {
+    border-color: var(--primary-color, #f97316);
+}
+</style>
+
 <script>
-// Define Loading element template
-document.body.insertAdjacentHTML('beforeend', `
-    <template id="loading-template">
-        <div style="text-align: center; padding: 40px;">
-            <div class="spinner" style="width: 40px; height: 40px; margin: 0 auto 16px;"></div>
-            <p class="text-muted">Saving...</p>
-        </div>
-    </template>
-`);
+(function() {
+    // Pre-select existing employment types
+    const existingTypes = document.getElementById('employment_types').value;
+    if (existingTypes) {
+        existingTypes.split(',').forEach(type => {
+            const checkbox = document.querySelector(`input[name="employment_type_tags"][value="${type.trim()}"]`);
+            if (checkbox) checkbox.checked = true;
+        });
+    }
+
+    // Update hidden input when tags are clicked
+    document.querySelectorAll('input[name="employment_type_tags"]').forEach(checkbox => {
+        checkbox.addEventListener('change', () => {
+            const selected = Array.from(document.querySelectorAll('input[name="employment_type_tags"]:checked'))
+                .map(cb => cb.value);
+            document.getElementById('employment_types').value = selected.join(',');
+        });
+    });
+})();
 </script>

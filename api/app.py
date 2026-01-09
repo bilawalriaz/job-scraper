@@ -347,7 +347,10 @@ async def htmx_scrape():
             try:
                 jobs = await scraper.search_jobs(
                     search_term=config.keywords,
-                    location=config.location
+                    location=config.location,
+                    radius=config.radius,
+                    employment_types=config.employment_types or None,
+                    max_pages=5  # Scrape up to 5 pages per config
                 )
 
                 app_logger.info(f"Found {len(jobs)} jobs for {config.name}")
@@ -519,7 +522,13 @@ async def api_scrape():
         for config in configs:
             app_logger.info(f"API scraping: {config.name}")
             try:
-                jobs = await scraper.search_jobs(config.keywords, config.location)
+                jobs = await scraper.search_jobs(
+                    config.keywords,
+                    config.location,
+                    radius=config.radius,
+                    employment_types=config.employment_types or None,
+                    max_pages=5
+                )
                 stats = db.insert_jobs_batch(jobs)
                 total_found += len(jobs)
                 total_added += stats['added']
@@ -569,8 +578,10 @@ def api_logs():
 @app.route('/api/console-logs/stream')
 def stream_console_logs():
     """SSE endpoint for streaming console logs."""
+    import json as json_mod
+
     def generate():
-        client_last_index = 0
+        client_last_index = len(log_buffer)
         while True:
             with log_buffer_lock:
                 buffer_len = len(log_buffer)
@@ -578,7 +589,8 @@ def stream_console_logs():
                     # Send new logs
                     for i in range(client_last_index, buffer_len):
                         log_entry = log_buffer[i]
-                        yield f"data: {jsonify(log_entry).get_data(as_text=True)}\n\n"
+                        json_str = json_mod.dumps(log_entry)
+                        yield f"data: {json_str}\n\n"
                     client_last_index = buffer_len
             import time
             time.sleep(0.5)  # Send updates every 0.5 seconds
