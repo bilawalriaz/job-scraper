@@ -1,0 +1,22 @@
+<div id="job-content">
+    <div class="mb-4">
+        <h5>Description</h5>
+        <div class="job-description">
+            {{ job.description|replace('\n', '<br>')|safe }}
+        </div>
+        <button class="btn btn-sm btn-link p-0 mt-2" _="on click toggle .expanded on .job-description">
+            Show More
+        </button>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Notes</label>
+        <p class="small text-muted">{{ job.notes or 'No notes' }}</p>
+    </div>
+
+    {% if job.is_edited %}
+    <div class="alert alert-info small">
+        <i class="bi bi-info-circle"></i> This entry has been manually edited
+    </div>
+    {% endif %}
+</div>

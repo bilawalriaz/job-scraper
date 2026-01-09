@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Search Configurations - Job Scraper{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1>Search Configurations</h1>
+            <button class="btn btn-primary"
+                    hx-get="/htmx/configs/new"
+                    hx-target="#config-form-container"
+                    data-bs-toggle="modal"
+                    data-bs-target="#config-modal">
+                <i class="bi bi-plus-circle"></i> Add New Search
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body p-0" id="configs-table" hx-get="/htmx/configs" hx-trigger="load">
+                <div class="htmx-indicator text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Config Modal -->
+<div class="modal fade" id="config-modal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" id="config-form-container">
+            <div class="modal-body text-center py-5">
+                <div class="spinner-border" role="status"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+htmx.trigger('#configs-table', 'load');
+</script>
+{% endblock %}

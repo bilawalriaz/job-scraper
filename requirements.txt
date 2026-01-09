@@ -1,0 +1,16 @@
+# Web Framework
+Flask==3.0.0
+
+# HTTP Client (for API calls)
+requests==2.31.0
+
+# Async Support
+asyncio==3.4.3
+
+# Playwright for Browser Automation
+playwright==1.40.0
+
+# Database (built-in sqlite3)
+
+# Utilities
+python-dotenv==1.0.0

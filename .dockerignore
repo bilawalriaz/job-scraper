@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+venv/
+*.venv
+
+# Database
+data/
+*.db
+*.db-journal
+
+# Debug
+debug.html
+debug.png
+debug.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Docs
+*.md
+docs/
+
+# Tests
+test/
+tests/
+*.test.py
+
+# Environment
+.env
+.env.local
+
+# Claude
+.claude/

@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Job Scraper{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <h1>Dashboard</h1>
+            <button class="btn btn-primary"
+                    hx-post="/htmx/scrape"
+                    hx-target="#scrape-result"
+                    hx-indicator="#scrape-loading">
+                <span class="htmx-indicator" id="scrape-loading">
+                    <span class="spinner-border spinner-border-sm me-2"></span>
+                </span>
+                <i class="bi bi-play-circle"></i> Run Scraper
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="scrape-result"></div>
+
+<!-- Stats Cards -->
+<div class="row mb-4" id="stats-container" hx-get="/htmx/stats" hx-trigger="load, every:30s">
+    <div class="htmx-indicator text-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Recent Jobs -->
+    <div class="col-lg-8 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-clock-history"></i> Recent Jobs</span>
+                <a href="/jobs" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush">
+                    {% for job in recent_jobs[:10] %}
+                    <div class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">
+                                <a href="/jobs/{{ job.id }}" class="text-decoration-none">
+                                    {{ job.title }}
+                                </a>
+                            </h6>
+                            <small class="text-muted">{{ job.posted_date or 'Unknown' }}</small>
+                        </div>
+                        <p class="mb-1 small text-muted">
+                            <i class="bi bi-building"></i> {{ job.company }}
+                            <span class="mx-2">&bull;</span>
+                            <i class="bi bi-geo-alt"></i> {{ job.location }}
+                        </p>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <small class="text-muted">
+                                {% if job.salary %}<i class="bi bi-currency-pound"></i> {{ job.salary }}{% endif %}
+                            </small>
+                            <span class="status-badge status-{{ job.status or 'new' }}">
+                                {{ job.status or 'new' }}
+                            </span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Search Configs -->
+    <div class="col-lg-4 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-search"></i> Active Searches
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush">
+                    {% for config in configs %}
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <h6 class="mb-1">{{ config.name }}</h6>
+                                <p class="mb-1 small text-muted">
+                                    {{ config.keywords }} in {{ config.location }}
+                                </p>
+                                <small class="text-muted">
+                                    {% if config.employment_types %}
+                                    <i class="bi bi-briefcase"></i> {{ config.employment_types }}
+                                    {% endif %}
+                                </small>
+                            </div>
+                            <span class="badge bg-success">Active</span>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="list-group-item text-center text-muted py-4">
+                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                        No active searches configured
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="card-footer">
+                <a href="/configs" class="btn btn-sm btn-primary w-100">Manage Searches</a>
+            </div>
+        </div>
+
+        <!-- Recent Logs -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <i class="bi bi-journal-text"></i> Recent Activity
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush">
+                    {% for log in logs[:5] %}
+                    <div class="list-group-item log-entry {% if log.success %}success{% else %}error{% endif %}">
+                        <div class="d-flex justify-content-between">
+                            <span>{{ log.source }}</span>
+                            <small class="text-muted">{{ log.started_at[:19] if log.started_at else '' }}</small>
+                        </div>
+                        <small class="text-muted">
+                            Found: {{ log.jobs_found }} |
+                            Added: {{ log.jobs_added }}
+                        </small>
+                    </div>
+                    {% else %}
+                    <div class="list-group-item text-center text-muted small">
+                        No recent activity
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

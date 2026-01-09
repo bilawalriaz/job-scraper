@@ -1,0 +1,31 @@
+<div class="alert {{ 'alert-success' if success else 'alert-danger' }} alert-dismissible fade show" role="alert">
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    {% if success %}
+        <h6 class="alert-heading"><i class="bi bi-check-circle"></i> Scrape Complete!</h6>
+        <p class="mb-2">Found {{ total_found }} jobs, added {{ total_added }} new jobs.</p>
+        {% if results %}
+        <div class="small">
+            {% for r in results %}
+            <div class="d-flex justify-content-between">
+                <span>{{ r.config }}</span>
+                <span>
+                    {% if r.found is defined %}
+                    Found: {{ r.found }}, Added: {{ r.added }}
+                    {% else %}
+                    <span class="text-danger">{{ r.error }}</span>
+                    {% endif %}
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    {% else %}
+        <h6 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> Scrape Failed</h6>
+        <p class="mb-0">{{ message }}</p>
+    {% endif %}
+</div>
+<script>
+setTimeout(() => {
+    htmx.trigger('#stats-container', 'load');
+}, 1000);
+</script>
