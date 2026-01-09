@@ -122,10 +122,31 @@ class TotalJobsScraper(BaseScraper):
                     logger.error(f"Error extracting job: {e}")
                     continue
 
-            # Check if there's a next page
+            # Check if there's a next page - try multiple selectors
             next_button = await self.page.query_selector('[data-at="pagination-next"]')
-            if not next_button or await next_button.is_disabled():
-                logger.info(f"No more pages available after page {page_num}")
+            if not next_button:
+                # Try alternative selectors
+                next_button = await self.page.query_selector('a[aria-label="Next"]')
+            if not next_button:
+                next_button = await self.page.query_selector('li.pagination-next a')
+            if not next_button:
+                next_button = await self.page.query_selector('a.next')
+
+            if next_button:
+                # Check if button is disabled by looking for common indicators
+                is_disabled = False
+                class_list = await next_button.get_attribute('class') or ''
+                aria_disabled = await next_button.get_attribute('aria-disabled')
+                href = await next_button.get_attribute('href')
+
+                if 'disabled' in class_list.lower() or aria_disabled == 'true' or not href or href == '#':
+                    is_disabled = True
+
+                if is_disabled:
+                    logger.info(f"Next button is disabled, stopping at page {page_num}")
+                    break
+            else:
+                logger.info(f"No next page button found, stopping at page {page_num}")
                 break
 
             logger.info(f"Scraped {len(jobs)} jobs so far, moving to next page...")

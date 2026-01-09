@@ -1,28 +1,33 @@
-<div class="modal-header">
-    <h5 class="modal-title">Edit Job</h5>
-    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<div class="card">
+    <div class="card-header d-flex justify-between align-center">
+        <span>Edit Job</span>
+        <button class="btn-close" style="background: none; border: none; font-size: 1.5rem; cursor: pointer;"
+                hx-get="/jobs/{{ job.id }}"
+                hx-target="#job-content">&times;</button>
+    </div>
+    <form hx-post="/htmx/jobs/{{ job.id }}/edit"
+          hx-target="#job-content">
+        <div style="padding: 20px 24px;">
+            <div style="margin-bottom: 16px;">
+                <label class="form-label">Notes</label>
+                <textarea class="form-control" name="notes" rows="4" placeholder="Add your notes here...">{{ job.notes or '' }}</textarea>
+            </div>
+            <div style="margin-bottom: 16px;">
+                <label class="form-label">Salary (override)</label>
+                <input type="text" class="form-control" name="salary" value="{{ job.salary or '' }}" placeholder="Leave empty to keep original">
+                <p class="text-muted small" style="margin-top: 4px;">Leave empty to keep original salary</p>
+            </div>
+        </div>
+        <div style="padding: 16px 24px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 12px;">
+            <button type="button" class="btn btn-secondary"
+                    hx-get="/jobs/{{ job.id }}"
+                    hx-target="#job-content">Cancel</button>
+            <button type="submit" class="btn btn-primary">
+                <span class="htmx-indicator" style="margin-right: 8px;">
+                    <span class="spinner"></span>
+                </span>
+                Save Changes
+            </button>
+        </div>
+    </form>
 </div>
-<form hx-post="/htmx/jobs/{{ job.id }}/edit"
-      hx-target="#job-content"
-      _="on htmx:afterRequest(loaded, detail) if detail.detail.successful trigger bs-modal-hide">
-    <div class="modal-body">
-        <div class="mb-3">
-            <label class="form-label">Notes</label>
-            <textarea class="form-control" name="notes" rows="4">{{ job.notes or '' }}</textarea>
-        </div>
-        <div class="mb-3">
-            <label class="form-label">Salary (override)</label>
-            <input type="text" class="form-control" name="salary" value="{{ job.salary or '' }}">
-            <small class="text-muted">Leave empty to keep original</small>
-        </div>
-    </div>
-    <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="submit" class="btn btn-primary">
-            <span class="htmx-indicator">
-                <span class="spinner-border spinner-border-sm me-1"></span>
-            </span>
-            Save Changes
-        </button>
-    </div>
-</form>
