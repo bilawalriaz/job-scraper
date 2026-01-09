@@ -280,6 +280,14 @@ pip install gunicorn
 gunicorn -w 4 -b 0.0.0.0:5000 api.app:app
 ```
 
+## Changelog
+
+### v1.1.0 (2026-01-09)
+- **Fixed TotalJobs pagination**: Added robust click handling with force=True and href fallback navigation
+- **Added Playwright to Docker**: Container now includes Playwright Chromium browser for headless scraping
+- **Improved error handling**: Distinguishes between transient network errors (HTTP2, connection issues) and actual pagination bugs
+- **Streamlined Dockerfile**: Removed unnecessary system dependencies for headless mode
+
 ## Troubleshooting
 
 ### Scraping Not Working
