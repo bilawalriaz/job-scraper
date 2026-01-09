@@ -50,11 +50,16 @@ class SearchConfig:
     radius: int = 10
     employment_types: str = ""  # comma-separated: permanent,contract,whf
     enabled: bool = True
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
     def to_dict(self) -> Dict:
         d = asdict(self)
         if self.id is None:
             d.pop('id', None)
+        # Exclude timestamps from output dict
+        d.pop('created_at', None)
+        d.pop('updated_at', None)
         return d
 
 

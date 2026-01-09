@@ -1,64 +1,32 @@
-<div class="col-6 col-md-3 mb-3">
-    <div class="card stat-card">
-        <div class="card-body">
-            <div class="stat-value">{{ stats.total }}</div>
-                            <div class="stat-label">Total Jobs</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-md-3 mb-3">
-                    <div class="card stat-card">
-                        <div class="card-body">
-                            <div class="stat-value">{{ stats.companies }}</div>
-                            <div class="stat-label">Companies</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-md-3 mb-3">
-                    <div class="card stat-card">
-                        <div class="card-body">
-                            <div class="stat-value">{{ stats.interested + stats.status_applied + stats.interviewing }}</div>
-                            <div class="stat-label">In Pipeline</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-md-3 mb-3">
-                    <div class="card stat-card">
-                        <div class="card-body">
-                            <div class="stat-value">{{ stats.contract }}</div>
-                            <div class="stat-label">Contract</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-md-3 mb-3">
-                    <div class="card stat-card">
-                        <div class="card-body">
-                            <div class="stat-value">{{ stats.permanent }}</div>
-                            <div class="stat-label">Permanent</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-md-3 mb-3">
-                    <div class="card stat-card">
-                        <div class="card-body">
-                            <div class="stat-value">{{ stats.remote }}</div>
-                            <div class="stat-label">Remote/WHF</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-md-3 mb-3">
-                    <div class="card stat-card">
-                        <div class="card-body">
-                            <div class="stat-value">{{ stats.sources }}</div>
-                            <div class="stat-label">Sources</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 col-md-3 mb-3">
-                    <div class="card stat-card">
-                        <div class="card-body">
-                            <div class="stat-value">{{ stats.applied }}</div>
-                            <div class="stat-label">Applied</div>
-                        </div>
-                    </div>
-                </div>
+<div class="stat-card">
+    <div class="stat-value">{{ stats.total }}</div>
+    <div class="stat-label">Total Jobs</div>
+</div>
+<div class="stat-card">
+    <div class="stat-value">{{ stats.companies }}</div>
+    <div class="stat-label">Companies</div>
+</div>
+<div class="stat-card">
+    <div class="stat-value">{{ stats.interested + stats.status_applied + stats.interviewing }}</div>
+    <div class="stat-label">In Pipeline</div>
+</div>
+<div class="stat-card">
+    <div class="stat-value">{{ stats.contract }}</div>
+    <div class="stat-label">Contract</div>
+</div>
+<div class="stat-card">
+    <div class="stat-value">{{ stats.permanent }}</div>
+    <div class="stat-label">Permanent</div>
+</div>
+<div class="stat-card">
+    <div class="stat-value">{{ stats.remote }}</div>
+    <div class="stat-label">Remote/WHF</div>
+</div>
+<div class="stat-card">
+    <div class="stat-value">{{ stats.sources }}</div>
+    <div class="stat-label">Sources</div>
+</div>
+<div class="stat-card">
+    <div class="stat-value">{{ stats.applied }}</div>
+    <div class="stat-label">Applied</div>
+</div>

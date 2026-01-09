@@ -1,18 +1,24 @@
-<div class="alert {{ 'alert-success' if success else 'alert-danger' }} alert-dismissible fade show" role="alert">
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+<div class="alert {{ 'alert-success' if success else 'alert-error' }}" style="position: relative;">
+    <button class="btn-close" style="position: absolute; right: 20px; top: 50%; transform: translateY(-50%);" _="on click remove .alert">&times;</button>
     {% if success %}
-        <h6 class="alert-heading"><i class="bi bi-check-circle"></i> Scrape Complete!</h6>
-        <p class="mb-2">Found {{ total_found }} jobs, added {{ total_added }} new jobs.</p>
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+            <strong style="font-size: 0.9375rem;">Scrape Complete!</strong>
+        </div>
+        <p style="margin-bottom: 12px;">Found <strong>{{ total_found }}</strong> jobs, added <strong>{{ total_added }}</strong> new jobs.</p>
         {% if results %}
-        <div class="small">
+        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(16, 185, 129, 0.2);">
             {% for r in results %}
-            <div class="d-flex justify-content-between">
-                <span>{{ r.config }}</span>
-                <span>
+            <div class="d-flex justify-between" style="font-size: 0.875rem; padding: 4px 0;">
+                <span style="font-weight: 500;">{{ r.config }}</span>
+                <span style="color: var(--text-muted);">
                     {% if r.found is defined %}
-                    Found: {{ r.found }}, Added: {{ r.added }}
+                    Found: <strong>{{ r.found }}</strong>, Added: <strong>{{ r.added }}</strong>
                     {% else %}
-                    <span class="text-danger">{{ r.error }}</span>
+                    <span style="color: #dc2626;">{{ r.error }}</span>
                     {% endif %}
                 </span>
             </div>
@@ -20,11 +26,19 @@
         </div>
         {% endif %}
     {% else %}
-        <h6 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> Scrape Failed</h6>
-        <p class="mb-0">{{ message }}</p>
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <strong style="font-size: 0.9375rem;">Scrape Failed</strong>
+        </div>
+        <p style="margin: 0;">{{ message }}</p>
     {% endif %}
 </div>
 <script>
+// Refresh stats after scrape
 setTimeout(() => {
     htmx.trigger('#stats-container', 'load');
 }, 1000);
