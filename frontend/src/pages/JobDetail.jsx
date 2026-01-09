@@ -255,7 +255,7 @@ function JobDetail() {
                 {/* Sidebar */}
                 <div>
                     {/* Status Card */}
-                    <Card style={{ marginBottom: '24px' }}>
+                    <Card>
                         <CardHeader>Status & Actions</CardHeader>
                         <div style={{ padding: '20px' }}>
                             <div style={{ marginBottom: '20px' }}>

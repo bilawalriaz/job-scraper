@@ -35,10 +35,10 @@ function Dashboard() {
 
     useEffect(() => {
         loadData();
-        // Refresh stats every 30 seconds
+        // Refresh stats every 5 seconds for near real-time updates
         const interval = setInterval(() => {
             getStats().then(setStats).catch(console.error);
-        }, 30000);
+        }, 5000);
         return () => clearInterval(interval);
     }, [loadData]);
 
@@ -160,7 +160,7 @@ function Dashboard() {
                 {/* Sidebar */}
                 <div className="sidebar">
                     {/* Active Searches */}
-                    <Card style={{ marginBottom: '24px' }}>
+                    <Card>
                         <CardHeader>Active Searches</CardHeader>
                         <CardBody noPadding>
                             {configs.length > 0 ? (

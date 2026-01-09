@@ -613,9 +613,23 @@ async def api_scrape():
 
 @app.route('/api/stats', methods=['GET'])
 def api_stats():
-    """API: Get stats."""
+    """API: Get stats formatted for frontend."""
     db = get_db()
-    return jsonify(db.get_stats())
+    raw_stats = db.get_stats()
+    configs = db.get_search_configs(enabled_only=True)
+
+    # Get count of new jobs (status='new')
+    cursor = db.conn.execute("SELECT COUNT(*) as count FROM jobs WHERE status = 'new'")
+    new_count = cursor.fetchone()['count']
+
+    return jsonify({
+        'total_jobs': raw_stats.get('total', 0),
+        'new_jobs': new_count,
+        'applied_jobs': raw_stats.get('applied', 0),
+        'active_configs': len(configs),
+        # Also include raw stats for other uses
+        **raw_stats
+    })
 
 
 @app.route('/api/logs', methods=['GET'])

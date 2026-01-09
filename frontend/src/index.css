@@ -510,6 +510,7 @@ footer {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 20px;
+    margin-top: 24px;
     margin-bottom: 32px;
 }
 
@@ -641,6 +642,15 @@ footer {
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 16px;
     align-items: end;
+}
+
+/* Card spacing utilities */
+.card + .card {
+    margin-top: 24px;
+}
+
+.card-mb {
+    margin-bottom: 24px;
 }
 
 /* Job Item in Dashboard */

@@ -76,7 +76,7 @@ function Jobs() {
             </div>
 
             {/* Filters */}
-            <Card style={{ marginBottom: '24px' }}>
+            <Card>
                 <CardBody>
                     <div className="filters-grid">
                         <div>
