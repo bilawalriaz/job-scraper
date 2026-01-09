@@ -241,6 +241,14 @@ def htmx_configs():
     return render_template('partials/configs_table.html', configs=configs)
 
 
+@app.route('/htmx/recent-activity')
+def htmx_recent_activity():
+    """HTMX partial for recent activity."""
+    db = get_db()
+    logs = db.get_recent_scrape_log(limit=10)
+    return render_template('partials/recent_activity.html', logs=logs)
+
+
 @app.route('/htmx/configs/new', methods=['GET'])
 def htmx_new_config_form():
     """HTMX form for new config."""
@@ -319,49 +327,67 @@ async def htmx_scrape():
 
     if not configs:
         app_logger.warning("No enabled configs found for scraping")
+        return render_template('partials/scrape_result.html',
+                             success=False,
+                             message="No enabled search configurations found")
 
     results = []
     total_found = 0
     total_added = 0
 
-    for config in configs:
-        app_logger.info(f"Scraping config: {config.name} (keywords: {config.keywords}, location: {config.location})")
+    scraper = None
+    try:
         scraper = TotalJobsDetailedScraper(db, headless=True)
+        app_logger.info("Initializing browser...")
+        await scraper.init_browser()
 
-        try:
-            jobs = await scraper.search_jobs(
-                search_term=config.keywords,
-                location=config.location
-            )
+        for config in configs:
+            app_logger.info(f"Scraping config: {config.name} (keywords: {config.keywords}, location: {config.location})")
 
-            app_logger.info(f"Found {len(jobs)} jobs for {config.name}")
+            try:
+                jobs = await scraper.search_jobs(
+                    search_term=config.keywords,
+                    location=config.location
+                )
 
-            stats = db.insert_jobs_batch(jobs)
-            total_found += len(jobs)
-            total_added += stats['added']
+                app_logger.info(f"Found {len(jobs)} jobs for {config.name}")
 
-            app_logger.info(f"Added {stats['added']} new jobs, updated {stats['updated']}, skipped {stats['skipped']}")
+                stats = db.insert_jobs_batch(jobs)
+                total_found += len(jobs)
+                total_added += stats['added']
 
-            db.log_scrape('totaljobs', config.id, len(jobs), stats['added'])
+                app_logger.info(f"Added {stats['added']} new jobs, updated {stats['updated']}, skipped {stats['skipped']}")
 
-            results.append({
-                'config': config.name,
-                'found': len(jobs),
-                'added': stats['added']
-            })
+                db.log_scrape('totaljobs', config.id, len(jobs), stats['added'])
 
-        except Exception as e:
-            app_logger.error(f"Error scraping {config.name}: {str(e)}")
-            db.log_scrape('totaljobs', config.id, 0, 0, success=False, error_message=str(e))
-            results.append({
-                'config': config.name,
-                'error': str(e)
-            })
+                results.append({
+                    'config': config.name,
+                    'found': len(jobs),
+                    'added': stats['added']
+                })
+
+            except Exception as e:
+                app_logger.error(f"Error scraping {config.name}: {str(e)}")
+                db.log_scrape('totaljobs', config.id, 0, 0, success=False, error_message=str(e))
+                results.append({
+                    'config': config.name,
+                    'error': str(e)
+                })
+
+    except Exception as e:
+        app_logger.error(f"Failed to initialize scraper: {str(e)}")
+        return render_template('partials/scrape_result.html',
+                             success=False,
+                             message=f"Failed to initialize browser: {str(e)}")
+    finally:
+        if scraper:
+            app_logger.info("Cleaning up browser resources...")
+            await scraper.cleanup()
 
     app_logger.info(f"Scrape complete: {total_found} found, {total_added} added")
 
     return render_template('partials/scrape_result.html',
-                         success=True,
+                         success=total_found > 0 or total_added == 0,
                          results=results,
                          total_found=total_found,
                          total_added=total_added)
@@ -463,9 +489,12 @@ async def api_scrape():
     data = request.get_json() or {}
     config_id = data.get('config_id')
 
+    app_logger.info(f"API scrape requested (config_id: {config_id})")
+
     # Rate limiting
     last_hour_count = db.get_scrape_count_last_hour('totaljobs')
     if last_hour_count >= 10:
+        app_logger.warning("Rate limited")
         return jsonify({'error': 'Rate limited'}), 429
 
     # Run scraper
@@ -473,29 +502,46 @@ async def api_scrape():
     if config_id:
         configs = [c for c in configs if c.id == config_id]
 
+    if not configs:
+        app_logger.warning("No enabled configs found")
+        return jsonify({'error': 'No enabled configurations found'}), 400
+
     results = []
     total_found = 0
     total_added = 0
 
-    for config in configs:
+    scraper = None
+    try:
         scraper = TotalJobsDetailedScraper(db, headless=True)
-        try:
-            jobs = await scraper.search_jobs(config.keywords, config.location)
-            stats = db.insert_jobs_batch(jobs)
-            total_found += len(jobs)
-            total_added += stats['added']
-            db.log_scrape('totaljobs', config.id, len(jobs), stats['added'])
-            results.append({
-                'config': config.name,
-                'found': len(jobs),
-                'added': stats['added']
-            })
-        except Exception as e:
-            db.log_scrape('totaljobs', config.id, 0, 0, success=False, error_message=str(e))
-            results.append({
-                'config': config.name,
-                'error': str(e)
-            })
+        app_logger.info("Initializing browser...")
+        await scraper.init_browser()
+
+        for config in configs:
+            app_logger.info(f"API scraping: {config.name}")
+            try:
+                jobs = await scraper.search_jobs(config.keywords, config.location)
+                stats = db.insert_jobs_batch(jobs)
+                total_found += len(jobs)
+                total_added += stats['added']
+                db.log_scrape('totaljobs', config.id, len(jobs), stats['added'])
+                results.append({
+                    'config': config.name,
+                    'found': len(jobs),
+                    'added': stats['added']
+                })
+            except Exception as e:
+                app_logger.error(f"Error scraping {config.name}: {e}")
+                db.log_scrape('totaljobs', config.id, 0, 0, success=False, error_message=str(e))
+                results.append({
+                    'config': config.name,
+                    'error': str(e)
+                })
+    except Exception as e:
+        app_logger.error(f"Failed to initialize scraper: {e}")
+        return jsonify({'error': f'Failed to initialize browser: {str(e)}'}), 500
+    finally:
+        if scraper:
+            await scraper.cleanup()
 
     return jsonify({
         'success': True,
