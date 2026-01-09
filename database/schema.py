@@ -102,9 +102,17 @@ class JobDatabase:
                 employment_type TEXT,
                 notes TEXT,
                 status TEXT DEFAULT 'new',
+                has_full_description BOOLEAN DEFAULT 0,
                 UNIQUE(company, title, location)
             )
         """)
+
+        # Migration: Add has_full_description column if it doesn't exist
+        try:
+            self.conn.execute("ALTER TABLE jobs ADD COLUMN has_full_description BOOLEAN DEFAULT 0")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
         # Search configs table
         self.conn.execute("""
@@ -487,14 +495,44 @@ class JobDatabase:
         """, (source,))
         return cursor.fetchone()['count']
 
+    def get_rate_limit_status(self) -> Dict:
+        """Get rate limit status for all sources."""
+        sources = ['totaljobs', 'reed', 'cvlibrary', 'indeed']
+        status = {}
+        for source in sources:
+            count = self.get_scrape_count_last_hour(source)
+            status[source] = {
+                'count': count,
+                'limit': 10,
+                'remaining': max(0, 10 - count),
+                'limited': count >= 10
+            }
+        return status
+
+    def reset_rate_limit(self, source: str = None) -> int:
+        """Reset rate limit by clearing recent scrape logs. Returns number of entries cleared."""
+        if source:
+            cursor = self.conn.execute("""
+                DELETE FROM scrape_log
+                WHERE source = ? AND started_at >= datetime('now', '-1 hour')
+            """, (source,))
+        else:
+            cursor = self.conn.execute("""
+                DELETE FROM scrape_log
+                WHERE started_at >= datetime('now', '-1 hour')
+            """)
+        self.conn.commit()
+        return cursor.rowcount
+
     def get_jobs_needing_descriptions(self, limit: int = 100, source: str = None) -> List[JobListing]:
-        """Get jobs that have short descriptions (likely from card-only scraping)."""
+        """Get jobs that don't have full descriptions yet."""
         query = """
             SELECT id, title, company, location, description, salary, job_type,
                    posted_date, url, source, scraped_at, employment_type
             FROM jobs
-            WHERE length(description) < 500
+            WHERE (has_full_description = 0 OR has_full_description IS NULL)
             AND url IS NOT NULL
+            AND url != ''
         """
         params = []
 
@@ -526,12 +564,52 @@ class JobDatabase:
 
         return jobs
 
-    def update_job_description(self, job_id: int, description: str) -> bool:
-        """Update a job's description."""
+    def get_partial_description_count(self) -> Dict:
+        """Get count of jobs needing full descriptions by source."""
+        cursor = self.conn.execute("""
+            SELECT source, COUNT(*) as count
+            FROM jobs
+            WHERE (has_full_description = 0 OR has_full_description IS NULL)
+            AND url IS NOT NULL AND url != ''
+            GROUP BY source
+        """)
+        result = {row['source']: row['count'] for row in cursor.fetchall()}
+
+        # Get total
+        cursor = self.conn.execute("""
+            SELECT COUNT(*) as total FROM jobs
+            WHERE (has_full_description = 0 OR has_full_description IS NULL)
+            AND url IS NOT NULL AND url != ''
+        """)
+        result['total'] = cursor.fetchone()['total']
+
+        return result
+
+    def update_job_description(self, job_id: int, description: str, mark_full: bool = True) -> bool:
+        """Update a job's description and optionally mark as having full description."""
+        try:
+            if mark_full:
+                self.conn.execute(
+                    """UPDATE jobs SET description = ?, has_full_description = 1,
+                       updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                    (description, job_id)
+                )
+            else:
+                self.conn.execute(
+                    "UPDATE jobs SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (description, job_id)
+                )
+            self.conn.commit()
+            return True
+        except sqlite3.Error:
+            return False
+
+    def mark_job_full_description(self, job_id: int) -> bool:
+        """Mark a job as having its full description."""
         try:
             self.conn.execute(
-                "UPDATE jobs SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (description, job_id)
+                "UPDATE jobs SET has_full_description = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (job_id,)
             )
             self.conn.commit()
             return True

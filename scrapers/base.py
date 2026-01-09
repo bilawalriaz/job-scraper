@@ -183,7 +183,7 @@ class BaseScraper(ABC):
             pass
 
     async def navigate_with_retry(self, url: str, max_retries: int = None) -> bool:
-        """Navigate with retry logic and rate limiting."""
+        """Navigate with retry logic and delays between requests."""
         if max_retries is None:
             max_retries = self.MAX_RETRIES
 
@@ -191,30 +191,24 @@ class BaseScraper(ABC):
 
         for attempt in range(max_retries):
             try:
-                # Check rate limit in database
-                last_hour_count = self.db.get_scrape_count_last_hour(self.get_site_name())
-                if last_hour_count >= 10:
-                    print(f"[!] Rate limited: {last_hour_count} scrapes in last hour, max 10 allowed")
-                    await asyncio.sleep(60)  # Wait a minute before retry
-                    continue
-
                 response = await self.page.goto(url, wait_until='domcontentloaded')
 
-                if response.status == 200:
+                if response and response.status == 200:
                     # Random human-like behavior
                     await asyncio.sleep(random.uniform(1, 2))
                     await self.human_like_scroll(2)
                     await self.human_like_mouse_move()
                     return True
-                elif response.status == 429:
+                elif response and response.status == 429:
                     wait_time = (attempt + 1) * 30
-                    print(f"[!] Rate limited. Waiting {wait_time}s...")
+                    print(f"[!] Site rate limited (429). Waiting {wait_time}s...")
                     await asyncio.sleep(wait_time)
-                elif response.status == 403:
+                elif response and response.status == 403:
                     print(f"[!] Access forbidden (403). IP may be blocked.")
                     return False
                 else:
-                    print(f"[!] Got status {response.status}, retrying...")
+                    status = response.status if response else 'unknown'
+                    print(f"[!] Got status {status}, retrying...")
                     await asyncio.sleep(5)
 
             except Exception as e:

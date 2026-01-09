@@ -10,10 +10,6 @@ from scrapers.totaljobs import TotalJobsDetailedScraper
 
 # Search configurations
 DEFAULT_SEARCHES = [
-    {'term': 'DevOps Engineer', 'location': 'London'},
-    {'term': 'Platform Engineer', 'location': 'Remote'},
-    {'term': 'SRE', 'location': 'London'},
-    {'term': 'Azure DevOps', 'location': 'Remote'},
 ]
 
 

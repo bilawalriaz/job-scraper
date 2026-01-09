@@ -734,3 +734,73 @@ code {
     font-family: var(--font-mono);
     font-size: 0.875rem;
 }
+
+/* Rate Limit Bar */
+.rate-limit-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: var(--radius-md);
+    margin-top: 12px;
+    font-size: 0.8125rem;
+}
+
+.rate-limit-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--bg-white);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.rate-limit-item.limited {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+.rate-limit-source {
+    font-weight: 600;
+    text-transform: capitalize;
+    color: var(--text-secondary);
+}
+
+.rate-limit-item.limited .rate-limit-source {
+    color: #dc2626;
+}
+
+.rate-limit-count {
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+}
+
+.rate-limit-item.limited .rate-limit-count {
+    color: #ef4444;
+}
+
+.rate-limit-reset {
+    margin-left: auto;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.rate-limit-reset:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: var(--text-primary);
+}
+
+.rate-limit-reset:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { getStats, getJobs, getConfigs, runScraper } from '../api/client';
+import { getStats, getJobs, getConfigs, runScraper, getRateLimitStatus, resetRateLimit } from '../api/client';
 import { Card, CardHeader, CardBody } from '../components/Card';
 import Button from '../components/Button';
 import Console from '../components/Console';
 import Spinner from '../components/Spinner';
 import { StatusBadge } from '../components/StatusBadge';
-import { PlayIcon, BriefcaseIcon, LocationIcon, DollarIcon, SearchIcon, UserIcon } from '../components/Icons';
+import { PlayIcon, BriefcaseIcon, LocationIcon, DollarIcon, SearchIcon, UserIcon, RefreshIcon } from '../components/Icons';
 
 function Dashboard() {
     const [stats, setStats] = useState(null);
@@ -15,17 +15,21 @@ function Dashboard() {
     const [loading, setLoading] = useState(true);
     const [scraping, setScraping] = useState(false);
     const [scrapeResult, setScrapeResult] = useState(null);
+    const [rateLimitStatus, setRateLimitStatus] = useState(null);
+    const [resettingRateLimit, setResettingRateLimit] = useState(false);
 
     const loadData = useCallback(async () => {
         try {
-            const [statsData, jobsData, configsData] = await Promise.all([
+            const [statsData, jobsData, configsData, rateLimitData] = await Promise.all([
                 getStats(),
                 getJobs({ per_page: 10 }),
-                getConfigs()
+                getConfigs(),
+                getRateLimitStatus()
             ]);
             setStats(statsData);
             setRecentJobs(jobsData.jobs || []);
             setConfigs(configsData.configs || []);
+            setRateLimitStatus(rateLimitData);
         } catch (error) {
             console.error('Failed to load dashboard data:', error);
         } finally {
@@ -35,9 +39,12 @@ function Dashboard() {
 
     useEffect(() => {
         loadData();
-        // Refresh stats every 5 seconds for near real-time updates
+        // Refresh stats and rate limits every 5 seconds for near real-time updates
         const interval = setInterval(() => {
-            getStats().then(setStats).catch(console.error);
+            Promise.all([
+                getStats().then(setStats),
+                getRateLimitStatus().then(setRateLimitStatus)
+            ]).catch(console.error);
         }, 5000);
         return () => clearInterval(interval);
     }, [loadData]);
@@ -56,6 +63,21 @@ function Dashboard() {
             setScraping(false);
         }
     };
+
+    const handleResetRateLimit = async () => {
+        setResettingRateLimit(true);
+        try {
+            const result = await resetRateLimit();
+            setRateLimitStatus(result.status);
+        } catch (error) {
+            console.error('Failed to reset rate limit:', error);
+        } finally {
+            setResettingRateLimit(false);
+        }
+    };
+
+    // Check if any source is rate limited
+    const isAnyRateLimited = rateLimitStatus && Object.values(rateLimitStatus).some(s => s.limited);
 
     if (loading) {
         return (
@@ -90,8 +112,44 @@ function Dashboard() {
                 </div>
             )}
 
+            {/* Rate Limit Warning */}
+            {isAnyRateLimited && (
+                <div className="alert alert-error d-flex justify-between align-center">
+                    <span>Rate limit reached for some sources. Wait or reset to continue scraping.</span>
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleResetRateLimit}
+                        loading={resettingRateLimit}
+                        style={{ marginLeft: '16px' }}
+                    >
+                        <RefreshIcon size={14} /> Reset Rate Limits
+                    </Button>
+                </div>
+            )}
+
             {/* Console */}
             <Console />
+
+            {/* Rate Limit Status */}
+            {rateLimitStatus && (
+                <div className="rate-limit-bar">
+                    {Object.entries(rateLimitStatus).map(([source, status]) => (
+                        <div key={source} className={`rate-limit-item ${status.limited ? 'limited' : ''}`}>
+                            <span className="rate-limit-source">{source}</span>
+                            <span className="rate-limit-count">{status.remaining}/{status.limit}</span>
+                        </div>
+                    ))}
+                    <button
+                        className="rate-limit-reset"
+                        onClick={handleResetRateLimit}
+                        disabled={resettingRateLimit}
+                        title="Reset all rate limits"
+                    >
+                        <RefreshIcon size={12} />
+                    </button>
+                </div>
+            )}
 
             {/* Stats Grid */}
             <div className="stats-grid">

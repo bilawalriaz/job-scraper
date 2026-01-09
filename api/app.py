@@ -15,6 +15,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.schema import JobDatabase, JobListing, SearchConfig
 from scrapers.totaljobs import TotalJobsDetailedScraper
+from scrapers.reed import ReedScraper
+from scrapers.cvlibrary import CVLibraryScraper
+from scrapers.indeed import IndeedScraper
+
+# Available scrapers configuration
+AVAILABLE_SCRAPERS = {
+    'totaljobs': TotalJobsDetailedScraper,
+    'reed': ReedScraper,
+    'cvlibrary': CVLibraryScraper,
+    'indeed': IndeedScraper,
+}
 
 
 app = Flask(__name__)
@@ -512,23 +523,77 @@ def api_delete_config(config_id):
     return jsonify({'error': 'Delete failed'}), 400
 
 
+async def scrape_source(source_name: str, configs: list, db_path: str) -> dict:
+    """Scrape a single source. Runs in parallel with other sources."""
+    # Each parallel task needs its own DB connection
+    db = JobDatabase(db_path)
+    scraper_class = AVAILABLE_SCRAPERS[source_name]
+    scraper = None
+    result = {'source': source_name, 'found': 0, 'added': 0}
+
+    try:
+        scraper = scraper_class(db, headless=True)
+        app_logger.info(f"[{source_name}] Initializing browser...")
+        await scraper.init_browser()
+
+        for config in configs:
+            app_logger.info(f"[{source_name}] Scraping: {config.name}")
+            try:
+                jobs = await scraper.search_jobs(
+                    config.keywords,
+                    config.location,
+                    radius=config.radius,
+                    employment_types=config.employment_types or None,
+                    max_pages=10,
+                    save_incrementally=True
+                )
+                jobs_found = len(jobs)
+                result['found'] += jobs_found
+                result['added'] += jobs_found
+                db.log_scrape(source_name, config.id, jobs_found, jobs_found)
+
+            except Exception as e:
+                app_logger.error(f"[{source_name}] Error scraping {config.name}: {e}")
+                db.log_scrape(source_name, config.id, 0, 0, success=False, error_message=str(e))
+
+        # Second pass for TotalJobs: Fetch full descriptions
+        if source_name == 'totaljobs' and hasattr(scraper, 'fetch_full_descriptions'):
+            app_logger.info(f"[{source_name}] Fetching full descriptions...")
+            jobs_needing_descriptions = db.get_jobs_needing_descriptions(limit=50, source='totaljobs')
+
+            if jobs_needing_descriptions:
+                updated_jobs = await scraper.fetch_full_descriptions(jobs_needing_descriptions)
+                for job in updated_jobs:
+                    cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
+                    row = cursor.fetchone()
+                    if row:
+                        db.update_job_description(row['id'], job.description)
+                app_logger.info(f"[{source_name}] Updated {len(updated_jobs)} descriptions")
+
+    except Exception as e:
+        app_logger.error(f"[{source_name}] Failed: {e}")
+        result['error'] = str(e)
+    finally:
+        if scraper:
+            await scraper.cleanup()
+        db.close()
+
+    app_logger.info(f"[{source_name}] Complete: {result['found']} jobs found")
+    return result
+
+
 @app.route('/api/scrape', methods=['POST'])
 @async_wrapper
 async def api_scrape():
-    """API: Trigger scrape."""
+    """API: Trigger scrape across all job sources IN PARALLEL."""
     db = get_db()
     data = request.get_json() or {}
     config_id = data.get('config_id')
+    sources = data.get('sources', list(AVAILABLE_SCRAPERS.keys()))
 
-    app_logger.info(f"API scrape requested (config_id: {config_id})")
+    app_logger.info(f"API scrape requested (sources: {sources})")
 
-    # Rate limiting
-    last_hour_count = db.get_scrape_count_last_hour('totaljobs')
-    if last_hour_count >= 10:
-        app_logger.warning("Rate limited")
-        return jsonify({'error': 'Rate limited'}), 429
-
-    # Run scraper
+    # Get enabled configs
     configs = db.get_search_configs(enabled_only=True)
     if config_id:
         configs = [c for c in configs if c.id == config_id]
@@ -537,77 +602,77 @@ async def api_scrape():
         app_logger.warning("No enabled configs found")
         return jsonify({'error': 'No enabled configurations found'}), 400
 
-    results = []
+    # Filter out rate-limited and invalid sources
+    valid_sources = []
+    skipped_results = []
+
+    for source_name in sources:
+        if source_name not in AVAILABLE_SCRAPERS:
+            app_logger.warning(f"Unknown source: {source_name}")
+            continue
+
+        rate_status = db.get_rate_limit_status().get(source_name, {})
+        if rate_status.get('limited', False):
+            app_logger.warning(f"Rate limited for {source_name}, skipping")
+            skipped_results.append({'source': source_name, 'error': 'Rate limited'})
+            continue
+
+        valid_sources.append(source_name)
+
+    if not valid_sources:
+        return jsonify({
+            'success': False,
+            'error': 'All sources are rate limited',
+            'results': skipped_results
+        }), 429
+
+    # Run all scrapers in PARALLEL
+    app_logger.info(f"Starting parallel scrape of {len(valid_sources)} sources: {valid_sources}")
+
+    # Convert configs to dicts for passing to parallel tasks
+    config_dicts = [{'id': c.id, 'name': c.name, 'keywords': c.keywords,
+                     'location': c.location, 'radius': c.radius,
+                     'employment_types': c.employment_types} for c in configs]
+
+    # Create config objects for each task (can't share across threads)
+    class ConfigObj:
+        def __init__(self, d):
+            self.id = d['id']
+            self.name = d['name']
+            self.keywords = d['keywords']
+            self.location = d['location']
+            self.radius = d['radius']
+            self.employment_types = d['employment_types']
+
+    config_objs = [ConfigObj(d) for d in config_dicts]
+
+    # Run all sources in parallel
+    tasks = [scrape_source(source, config_objs, app.config['DB_PATH']) for source in valid_sources]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Process results
+    final_results = skipped_results.copy()
     total_found = 0
     total_added = 0
 
-    scraper = None
-    try:
-        scraper = TotalJobsDetailedScraper(db, headless=True)
-        app_logger.info("Initializing browser...")
-        await scraper.init_browser()
-
-        for config in configs:
-            app_logger.info(f"API scraping: {config.name}")
-            try:
-                # Jobs are saved incrementally as they're scraped
-                jobs = await scraper.search_jobs(
-                    config.keywords,
-                    config.location,
-                    radius=config.radius,
-                    employment_types=config.employment_types or None,
-                    max_pages=20,
-                    save_incrementally=True
-                )
-                jobs_found = len(jobs)
-                total_found += jobs_found
-                total_added += jobs_found  # All scraped jobs were saved
-                db.log_scrape('totaljobs', config.id, jobs_found, jobs_found)
-                results.append({
-                    'config': config.name,
-                    'found': jobs_found,
-                    'added': jobs_found
-                })
-            except Exception as e:
-                app_logger.error(f"Error scraping {config.name}: {e}")
-                db.log_scrape('totaljobs', config.id, 0, 0, success=False, error_message=str(e))
-                results.append({
-                    'config': config.name,
-                    'error': str(e)
-                })
-
-        # Second pass: Fetch full descriptions for jobs with short descriptions
-        app_logger.info("Starting second pass: fetching full descriptions...")
-        jobs_needing_descriptions = db.get_jobs_needing_descriptions(limit=200, source='totaljobs')
-
-        if jobs_needing_descriptions:
-            app_logger.info(f"Fetching full descriptions for {len(jobs_needing_descriptions)} jobs...")
-
-            updated_jobs = await scraper.fetch_full_descriptions(jobs_needing_descriptions)
-
-            # Update descriptions in database
-            for job in updated_jobs:
-                cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
-                row = cursor.fetchone()
-                if row:
-                    db.update_job_description(row['id'], job.description)
-
-            app_logger.info(f"Updated descriptions for {len(updated_jobs)} jobs")
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            final_results.append({
+                'source': valid_sources[i],
+                'error': str(result)
+            })
         else:
-            app_logger.info("No jobs need full descriptions")
+            final_results.append(result)
+            total_found += result.get('found', 0)
+            total_added += result.get('added', 0)
 
-    except Exception as e:
-        app_logger.error(f"Failed to initialize scraper: {e}")
-        return jsonify({'error': f'Failed to initialize browser: {str(e)}'}), 500
-    finally:
-        if scraper:
-            await scraper.cleanup()
+    app_logger.info(f"Parallel scrape complete: {total_found} jobs found across all sources")
 
     return jsonify({
         'success': True,
         'total_found': total_found,
         'total_added': total_added,
-        'results': results
+        'results': final_results
     })
 
 
@@ -638,6 +703,39 @@ def api_logs():
     db = get_db()
     limit = int(request.args.get('limit', 50))
     return jsonify({'logs': db.get_recent_scrape_log(limit=limit)})
+
+
+@app.route('/api/rate-limit', methods=['GET'])
+def api_rate_limit_status():
+    """API: Get rate limit status for all sources."""
+    db = get_db()
+    return jsonify(db.get_rate_limit_status())
+
+
+@app.route('/api/sources', methods=['GET'])
+def api_sources():
+    """API: Get available scraper sources."""
+    return jsonify({
+        'sources': list(AVAILABLE_SCRAPERS.keys())
+    })
+
+
+@app.route('/api/rate-limit/reset', methods=['POST'])
+def api_rate_limit_reset():
+    """API: Reset rate limit for a source or all sources."""
+    db = get_db()
+    data = request.get_json() or {}
+    source = data.get('source')  # None means reset all
+
+    cleared = db.reset_rate_limit(source)
+    app_logger.info(f"Rate limit reset: cleared {cleared} entries" + (f" for {source}" if source else " for all sources"))
+
+    return jsonify({
+        'success': True,
+        'cleared': cleared,
+        'source': source or 'all',
+        'status': db.get_rate_limit_status()
+    })
 
 
 @app.route('/api/console-logs/stream')

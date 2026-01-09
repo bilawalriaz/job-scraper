@@ -94,6 +94,18 @@ export async function getLogs() {
     return fetchAPI('/logs');
 }
 
+// Rate Limit
+export async function getRateLimitStatus() {
+    return fetchAPI('/rate-limit');
+}
+
+export async function resetRateLimit(source = null) {
+    return fetchAPI('/rate-limit/reset', {
+        method: 'POST',
+        body: JSON.stringify({ source }),
+    });
+}
+
 // Console logs (for initial load)
 export async function getConsoleLogs() {
     return fetchAPI('/console-logs');
