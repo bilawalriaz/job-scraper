@@ -136,10 +136,24 @@ class TotalJobsScraper(BaseScraper):
             # Click next button to navigate naturally (avoids anti-bot detection)
             logger.info(f"Clicking next button to go to page {page_num + 1}...")
             try:
+                # Scroll button into view
+                await next_button.scroll_into_view_if_needed()
+                await self.random_delay(0.5, 1)
+
+                # Click the button
                 await next_button.click()
-                # Wait for navigation and new content to load
-                await self.page.wait_for_load_state('networkidle', timeout=30000)
+
+                # Wait for either navigation OR job cards to appear (handles both cases)
+                try:
+                    await self.page.wait_for_load_state('networkidle', timeout=15000)
+                except:
+                    logger.info("Networkidle timeout, checking if jobs loaded anyway...")
+
+                # Additional wait for job cards to load
+                await self.page.wait_for_selector('[data-at="job-item"]', timeout=15000)
                 await self.random_delay(2, 3)  # Human-like delay between pages
+
+                logger.info(f"Successfully navigated to page {page_num + 1}")
             except Exception as e:
                 logger.warning(f"Failed to click next button: {e}")
                 break
