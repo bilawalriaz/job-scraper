@@ -216,19 +216,21 @@ async def scrape_source(source_name: str, configs: list, db_path: str) -> dict:
                 app_logger.error(f"[{source_name}] Error scraping {config.name}: {e}")
                 db.log_scrape(source_name, config.id, 0, 0, success=False, error_message=str(e))
 
-        # Second pass for TotalJobs: Fetch full descriptions
-        if source_name == 'totaljobs' and hasattr(scraper, 'fetch_full_descriptions'):
+        # Second pass: Fetch full descriptions for all sources
+        if hasattr(scraper, 'fetch_full_descriptions'):
             app_logger.info(f"[{source_name}] Fetching full descriptions...")
-            jobs_needing_descriptions = db.get_jobs_needing_descriptions(limit=50, source='totaljobs')
+            jobs_needing_descriptions = db.get_jobs_needing_descriptions(limit=50, source=source_name)
 
             if jobs_needing_descriptions:
                 updated_jobs = await scraper.fetch_full_descriptions(jobs_needing_descriptions)
+                updated_count = 0
                 for job in updated_jobs:
                     cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
                     row = cursor.fetchone()
-                    if row:
-                        db.update_job_description(row['id'], job.description)
-                app_logger.info(f"[{source_name}] Updated {len(updated_jobs)} descriptions")
+                    if row and job.description and len(job.description) > 200:
+                        db.update_job_description(row['id'], job.description, mark_full=True)
+                        updated_count += 1
+                app_logger.info(f"[{source_name}] Updated {updated_count} descriptions")
 
     except Exception as e:
         app_logger.error(f"[{source_name}] Failed: {e}")

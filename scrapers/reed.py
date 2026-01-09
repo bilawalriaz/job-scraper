@@ -57,18 +57,18 @@ class ReedScraper(BaseScraper):
         jobs = []
         stats = {'added': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
 
-        # Build search URL - Reed uses different URL structure
-        # https://www.reed.co.uk/jobs/python-developer-jobs-in-london?proximity=10
-        search_slug = search_term.lower().replace(' ', '-')
-        location_slug = location.lower().replace(' ', '-')
-
-        base_search_url = f"{self.BASE_URL}/jobs/{search_slug}-jobs-in-{location_slug}"
-        params = {'proximity': radius}
+        # Build search URL using query parameters (more reliable than slug format)
+        # https://www.reed.co.uk/jobs?keywords=python+developer&location=london&proximity=10
+        params = {
+            'keywords': search_term,
+            'location': location,
+            'proximity': radius,
+        }
 
         logger.info(f"Searching Reed for '{search_term}' in {location}")
 
         # Load first page
-        search_url = f"{base_search_url}?{urlencode(params)}"
+        search_url = f"{self.BASE_URL}/jobs?{urlencode(params)}"
         if not await self.navigate_with_retry(search_url):
             logger.error(f"Failed to load {search_url}")
             return jobs
@@ -112,20 +112,29 @@ class ReedScraper(BaseScraper):
             if save_incrementally:
                 logger.info(f"Page {page_num} complete - Total: {len(jobs)} scraped, {stats['added']} added, {stats['skipped']} skipped")
 
-            # Check for next page
-            next_button = await self.page.query_selector('a[data-qa="pagination-next"]')
+            # Check for next page - Reed uses text-based "Next" link with pageno parameter
+            # Try multiple approaches to find the next page link
+            next_button = None
+
+            # Method 1: Look for link containing "Next" text
+            all_links = await self.page.query_selector_all('a')
+            for link in all_links:
+                text = await link.inner_text()
+                if text.strip().lower() == 'next':
+                    next_button = link
+                    break
+
+            # Method 2: Look for pagination links by data attributes
             if not next_button:
-                # Try alternate selector
-                next_button = await self.page.query_selector('a.pagination__next')
+                next_button = await self.page.query_selector('a[data-qa="pagination-next"]')
+
+            # Method 3: Look for link with pageno parameter for next page
+            if not next_button:
+                next_page_num = page_num + 1
+                next_button = await self.page.query_selector(f'a[href*="pageno={next_page_num}"]')
 
             if not next_button:
                 logger.info(f"No next page button found, stopping at page {page_num}")
-                break
-
-            # Check if disabled
-            is_disabled = await next_button.get_attribute('aria-disabled')
-            if is_disabled == 'true':
-                logger.info(f"Next button is disabled, stopping at page {page_num}")
                 break
 
             # Navigate to next page

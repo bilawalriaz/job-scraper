@@ -1,6 +1,7 @@
 """Base scraper class with stealth mode for job sites."""
 
 import asyncio
+import logging
 import random
 import time
 from abc import ABC, abstractmethod
@@ -9,6 +10,9 @@ from datetime import datetime
 
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
 from database.schema import JobListing, JobDatabase
+from scrapers.description_fetcher import DescriptionFetcher
+
+logger = logging.getLogger('scrapers.base')
 
 
 class BaseScraper(ABC):
@@ -264,6 +268,55 @@ class BaseScraper(ABC):
 
         finally:
             await self.cleanup()
+
+    async def fetch_full_descriptions(self, jobs: List[JobListing], max_jobs: int = None) -> List[JobListing]:
+        """
+        Fetch full descriptions for a list of jobs using curl_cffi.
+
+        Uses curl_cffi's browser TLS impersonation to bypass anti-bot protections.
+        This method is inherited by all scrapers.
+
+        Args:
+            jobs: List of jobs to fetch descriptions for
+            max_jobs: Maximum number of jobs to process (None = all)
+
+        Returns:
+            List of jobs with updated descriptions
+        """
+        if max_jobs:
+            jobs = jobs[:max_jobs]
+
+        source = self.get_site_name()
+        logger.info(f"[{source}] Fetching full descriptions for {len(jobs)} jobs using curl_cffi...")
+
+        # Initialize the description fetcher with TLS impersonation
+        fetcher = DescriptionFetcher(max_retries=3, timeout=30)
+
+        for i, job in enumerate(jobs):
+            if not job.url:
+                logger.warning(f"[{source}] Skipping {job.title} - no URL")
+                continue
+
+            try:
+                logger.info(f"[{source}] [{i+1}/{len(jobs)}] Fetching: {job.title}")
+
+                # Use curl_cffi to fetch the description
+                description = fetcher.fetch_description(job.url, source=source)
+
+                if description:
+                    job.description = description
+                    logger.info(f"[{source}] Updated description for {job.title} ({len(description)} chars)")
+                else:
+                    logger.warning(f"[{source}] Could not extract description for {job.title}")
+
+                # Small delay between requests
+                await asyncio.sleep(0.5)
+
+            except Exception as e:
+                logger.error(f"[{source}] Error fetching details for {job.title}: {e}")
+
+        logger.info(f"[{source}] Completed fetching descriptions for {len(jobs)} jobs")
+        return jobs
 
     async def cleanup(self):
         """Clean up browser resources."""

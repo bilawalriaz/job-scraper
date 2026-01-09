@@ -139,9 +139,27 @@ class IndeedScraper(BaseScraper):
             next_button = (
                 await self.page.query_selector('a[data-testid="pagination-page-next"]') or
                 await self.page.query_selector('a[aria-label="Next Page"]') or
+                await self.page.query_selector('a[aria-label="Next"]') or
                 await self.page.query_selector('.np[data-pp]') or
                 await self.page.query_selector('nav[aria-label="pagination"] a:last-child')
             )
+
+            # Method 2: Look for link containing "Next" text
+            if not next_button:
+                all_links = await self.page.query_selector_all('nav a, .pagination a')
+                for link in all_links:
+                    try:
+                        text = await link.inner_text()
+                        if text.strip().lower() in ['next', '›', '»']:
+                            next_button = link
+                            break
+                    except:
+                        continue
+
+            # Method 3: Look for start parameter (Indeed uses start=10, start=20, etc)
+            if not next_button:
+                next_start = page_num * 10  # Indeed shows 10 jobs per page
+                next_button = await self.page.query_selector(f'a[href*="start={next_start}"]')
 
             if not next_button:
                 logger.info(f"No next page button found, stopping at page {page_num}")
@@ -193,14 +211,26 @@ class IndeedScraper(BaseScraper):
                 return None
 
             title = await title_elem.inner_text()
-            url = await title_elem.get_attribute('href')
-            if url and not url.startswith('http'):
-                url = f"{self.BASE_URL}{url}"
 
-            # Job key for Indeed-specific URL building
+            # Get job key first - this gives us a clean, direct URL
             job_key = await card.get_attribute('data-jk')
-            if job_key and not url:
+            if not job_key:
+                # Try to extract from the link href
+                href = await title_elem.get_attribute('href') or ''
+                # Extract jk parameter from tracking URL like /rc/clk?jk=abc123&...
+                import re
+                jk_match = re.search(r'[?&]jk=([a-f0-9]+)', href)
+                if jk_match:
+                    job_key = jk_match.group(1)
+
+            # Build direct viewjob URL (avoids tracking URL issues)
+            if job_key:
                 url = f"{self.BASE_URL}/viewjob?jk={job_key}"
+            else:
+                # Fallback to href if no job key found
+                url = await title_elem.get_attribute('href')
+                if url and not url.startswith('http'):
+                    url = f"{self.BASE_URL}{url}"
 
             # Company
             company_elem = (

@@ -73,12 +73,15 @@ class JobDatabase:
 
     def _init_db(self):
         """Initialize database schema."""
-        self.conn = sqlite3.connect(self.db_path, timeout=30.0)
+        self.conn = sqlite3.connect(self.db_path, timeout=60.0)
         self.conn.row_factory = sqlite3.Row
 
         # Enable WAL mode for better concurrent access
         self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA busy_timeout=30000")
+        # Set busy timeout to wait for locks instead of failing immediately (60 seconds)
+        self.conn.execute("PRAGMA busy_timeout=60000")
+        # Synchronous NORMAL is safer than OFF but faster than FULL
+        self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
 
         # Jobs table with edit tracking
@@ -159,6 +162,11 @@ class JobDatabase:
 
     def _create_default_configs(self):
         """Create default search configurations if they don't exist."""
+        # Check if configs already exist to avoid unnecessary writes
+        cursor = self.conn.execute("SELECT COUNT(*) FROM search_configs")
+        if cursor.fetchone()[0] > 0:
+            return  # Configs already exist, skip initialization
+
         default_configs = [
             # Remote searches (contract, permanent, WFH)
             {'name': 'Python AI - Remote', 'keywords': 'python ai', 'location': 'Remote', 'radius': 0, 'employment_types': 'contract,permanent,wfh'},
@@ -496,16 +504,16 @@ class JobDatabase:
         return cursor.fetchone()['count']
 
     def get_rate_limit_status(self) -> Dict:
-        """Get rate limit status for all sources."""
+        """Get scrape status for all sources (rate limiting disabled - scrapers have built-in delays)."""
         sources = ['totaljobs', 'reed', 'cvlibrary', 'indeed']
         status = {}
         for source in sources:
             count = self.get_scrape_count_last_hour(source)
+            # Rate limiting disabled - scrapers have built-in delays between requests
+            # Just tracking counts for informational purposes
             status[source] = {
                 'count': count,
-                'limit': 10,
-                'remaining': max(0, 10 - count),
-                'limited': count >= 10
+                'limited': False  # No arbitrary limits
             }
         return status
 

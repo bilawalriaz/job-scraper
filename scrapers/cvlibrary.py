@@ -119,12 +119,38 @@ class CVLibraryScraper(BaseScraper):
             if save_incrementally:
                 logger.info(f"Page {page_num} complete - Total: {len(jobs)} scraped, {stats['added']} added, {stats['skipped']} skipped")
 
-            # Check for next page - try multiple selectors
+            # Check for next page - try multiple methods
+            next_button = None
+
+            # Method 1: Standard pagination selectors
             next_button = (
                 await self.page.query_selector('a.pagination__link--next') or
                 await self.page.query_selector('a[rel="next"]') or
-                await self.page.query_selector('.pagination__next a')
+                await self.page.query_selector('.pagination__next a') or
+                await self.page.query_selector('a[aria-label="Next"]') or
+                await self.page.query_selector('a[aria-label="Next page"]')
             )
+
+            # Method 2: Look for link containing "Next" text
+            if not next_button:
+                all_links = await self.page.query_selector_all('a')
+                for link in all_links:
+                    try:
+                        text = await link.inner_text()
+                        if text.strip().lower() in ['next', 'next page', '›', '»']:
+                            next_button = link
+                            break
+                    except:
+                        continue
+
+            # Method 3: Look for page parameter in URL (page=2, p=2, offset=)
+            if not next_button:
+                next_page_num = page_num + 1
+                next_button = (
+                    await self.page.query_selector(f'a[href*="page={next_page_num}"]') or
+                    await self.page.query_selector(f'a[href*="p={next_page_num}"]') or
+                    await self.page.query_selector(f'a[href*="offset="]')
+                )
 
             if not next_button:
                 logger.info(f"No next page button found, stopping at page {page_num}")
@@ -132,7 +158,8 @@ class CVLibraryScraper(BaseScraper):
 
             # Check if disabled
             class_list = await next_button.get_attribute('class') or ''
-            if 'disabled' in class_list.lower():
+            aria_disabled = await next_button.get_attribute('aria-disabled') or ''
+            if 'disabled' in class_list.lower() or aria_disabled == 'true':
                 logger.info(f"Next button is disabled, stopping at page {page_num}")
                 break
 
