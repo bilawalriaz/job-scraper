@@ -290,16 +290,44 @@ body {
     font-family: var(--font-mono);
 }
 
-.status-new { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
-.status-interested { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
-.status-applied { background: rgba(16, 185, 129, 0.12); color: #10b981; }
-.status-interviewing { background: rgba(139, 92, 246, 0.12); color: #8b5cf6; }
-.status-offer { background: rgba(34, 197, 94, 0.12); color: #22c55e; }
-.status-rejected { background: rgba(239, 68, 68, 0.12); color: #ef4444; }
-.status-archived { background: rgba(148, 163, 184, 0.12); color: #94a3b8; }
+.status-new {
+    background: rgba(59, 130, 246, 0.12);
+    color: #3b82f6;
+}
+
+.status-interested {
+    background: rgba(245, 158, 11, 0.12);
+    color: #f59e0b;
+}
+
+.status-applied {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10b981;
+}
+
+.status-interviewing {
+    background: rgba(139, 92, 246, 0.12);
+    color: #8b5cf6;
+}
+
+.status-offer {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+}
+
+.status-rejected {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+}
+
+.status-archived {
+    background: rgba(148, 163, 184, 0.12);
+    color: #94a3b8;
+}
 
 /* Forms */
-.form-control, .form-select {
+.form-control,
+.form-select {
     width: 100%;
     padding: 12px 16px;
     font-size: 0.875rem;
@@ -310,7 +338,8 @@ body {
     transition: all 0.2s ease;
 }
 
-.form-control:focus, .form-select:focus {
+.form-control:focus,
+.form-select:focus {
     outline: none;
     border-color: var(--accent-orange);
     box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
@@ -424,7 +453,9 @@ body {
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* Alert */
@@ -459,24 +490,77 @@ a:hover {
 }
 
 /* Utility Classes */
-.text-muted { color: var(--text-muted); }
-.text-primary { color: var(--text-primary); }
-.text-secondary { color: var(--text-secondary); }
-.small { font-size: 0.875rem; }
-.mb-2 { margin-bottom: 8px; }
-.mb-3 { margin-bottom: 12px; }
-.mb-4 { margin-bottom: 16px; }
-.mt-4 { margin-top: 16px; }
-.d-flex { display: flex; }
-.flex-wrap { flex-wrap: wrap; }
-.justify-between { justify-content: space-between; }
-.justify-center { justify-content: center; }
-.align-center { align-items: center; }
-.gap-2 { gap: 8px; }
-.gap-3 { gap: 12px; }
-.gap-4 { gap: 16px; }
-.w-full { width: 100%; }
-.text-center { text-align: center; }
+.text-muted {
+    color: var(--text-muted);
+}
+
+.text-primary {
+    color: var(--text-primary);
+}
+
+.text-secondary {
+    color: var(--text-secondary);
+}
+
+.small {
+    font-size: 0.875rem;
+}
+
+.mb-2 {
+    margin-bottom: 8px;
+}
+
+.mb-3 {
+    margin-bottom: 12px;
+}
+
+.mb-4 {
+    margin-bottom: 16px;
+}
+
+.mt-4 {
+    margin-top: 16px;
+}
+
+.d-flex {
+    display: flex;
+}
+
+.flex-wrap {
+    flex-wrap: wrap;
+}
+
+.justify-between {
+    justify-content: space-between;
+}
+
+.justify-center {
+    justify-content: center;
+}
+
+.align-center {
+    align-items: center;
+}
+
+.gap-2 {
+    gap: 8px;
+}
+
+.gap-3 {
+    gap: 12px;
+}
+
+.gap-4 {
+    gap: 16px;
+}
+
+.w-full {
+    width: 100%;
+}
+
+.text-center {
+    text-align: center;
+}
 
 /* Footer */
 footer {
@@ -546,10 +630,21 @@ footer {
     color: #6e7681;
 }
 
-.console-level-INFO { color: #54a0ff; }
-.console-level-WARNING { color: #feca57; }
-.console-level-ERROR { color: #ff6b6b; }
-.console-level-DEBUG { color: #8b9dc3; }
+.console-level-INFO {
+    color: #54a0ff;
+}
+
+.console-level-WARNING {
+    color: #feca57;
+}
+
+.console-level-ERROR {
+    color: #ff6b6b;
+}
+
+.console-level-DEBUG {
+    color: #8b9dc3;
+}
 
 /* Main Layout */
 .main-sidebar-layout {
@@ -620,11 +715,56 @@ footer {
     max-height: 200px;
     overflow: hidden;
     transition: max-height 0.3s ease;
-    line-height: 1.6;
+    line-height: 1.7;
+    font-size: 0.9375rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 .job-description.expanded {
     max-height: none;
+}
+
+/* Typography within job descriptions */
+.job-description p,
+.job-description div {
+    margin-bottom: 1em;
+}
+
+.job-description ul,
+.job-description ol {
+    margin: 1em 0;
+    padding-left: 1.5em;
+}
+
+.job-description li {
+    margin-bottom: 0.5em;
+}
+
+.job-description h1,
+.job-description h2,
+.job-description h3,
+.job-description h4,
+.job-description h5,
+.job-description h6,
+.job-description strong,
+.job-description b {
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-top: 1.25em;
+    margin-bottom: 0.5em;
+}
+
+.job-description a {
+    color: var(--accent-orange);
+    text-decoration: underline;
+}
+
+.job-description br {
+    display: block;
+    content: "";
+    margin-bottom: 0.75em;
 }
 
 .show-more-btn {
@@ -651,7 +791,7 @@ footer {
 }
 
 /* Card spacing utilities */
-.card + .card {
+.card+.card {
     margin-top: 24px;
 }
 
