@@ -6,6 +6,7 @@ from typing import List, Optional
 from urllib.parse import urlencode
 
 from scrapers.base import BaseScraper
+from scrapers.description_fetcher import DescriptionFetcher
 from database.schema import JobListing
 
 logger = logging.getLogger('scrapers.totaljobs')
@@ -449,8 +450,11 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
         if not detailed or len(jobs) > max_jobs:
             return jobs[:max_jobs]
 
-        # Fetch detailed descriptions for subset
-        logger.info(f"Fetching detailed info for {min(len(jobs), max_jobs)} jobs...")
+        # Fetch detailed descriptions for subset using curl_cffi
+        logger.info(f"Fetching detailed info for {min(len(jobs), max_jobs)} jobs using curl_cffi...")
+
+        # Initialize the description fetcher with TLS impersonation
+        fetcher = DescriptionFetcher(max_retries=3, timeout=30)
         detailed_jobs = []
 
         for i, job in enumerate(jobs[:max_jobs]):
@@ -461,22 +465,20 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
             try:
                 logger.info(f"[{i+1}/{min(len(jobs), max_jobs)}] Fetching: {job.title}")
 
-                if await self.navigate_with_retry(job.url):
-                    # Wait for page to load - look for any content element
-                    try:
-                        await self.page.wait_for_selector('body', timeout=5000)
-                    except:
-                        pass
+                # Use curl_cffi to fetch the description
+                description = fetcher.fetch_description(job.url)
 
-                    description = await self._get_job_description_from_page()
-                    if description:
-                        job.description = description
-                        logger.info(f"Got description ({len(description)} chars)")
-                    else:
-                        logger.warning(f"Could not extract description for {job.title}")
+                if description:
+                    job.description = description
+                    logger.info(f"Got description ({len(description)} chars)")
+                else:
+                    logger.warning(f"Could not extract description for {job.title}")
 
-                    detailed_jobs.append(job)
-                    await self.random_delay(2, 4)
+                detailed_jobs.append(job)
+
+                # Small delay between requests
+                import asyncio
+                await asyncio.sleep(0.5)
 
             except Exception as e:
                 logger.error(f"Error fetching details for {job.title}: {e}")
@@ -486,8 +488,10 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
 
     async def fetch_full_descriptions(self, jobs: List[JobListing], max_jobs: int = None) -> List[JobListing]:
         """
-        Fetch full descriptions for a list of jobs.
-        Useful for second-pass scraping after deduplication.
+        Fetch full descriptions for a list of jobs using curl_cffi.
+
+        Uses curl_cffi's browser TLS impersonation to bypass anti-bot protections
+        that block Playwright/Selenium (like ERR_HTTP2_PROTOCOL_ERROR).
 
         Args:
             jobs: List of jobs to fetch descriptions for
@@ -496,7 +500,10 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
         if max_jobs:
             jobs = jobs[:max_jobs]
 
-        logger.info(f"Fetching full descriptions for {len(jobs)} jobs...")
+        logger.info(f"Fetching full descriptions for {len(jobs)} jobs using curl_cffi...")
+
+        # Initialize the description fetcher with TLS impersonation
+        fetcher = DescriptionFetcher(max_retries=3, timeout=30)
 
         for i, job in enumerate(jobs):
             if not job.url:
@@ -506,21 +513,18 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
             try:
                 logger.info(f"[{i+1}/{len(jobs)}] Fetching: {job.title}")
 
-                if await self.navigate_with_retry(job.url):
-                    # Wait for page to load
-                    try:
-                        await self.page.wait_for_selector('body', timeout=5000)
-                    except:
-                        pass
+                # Use curl_cffi to fetch the description
+                description = fetcher.fetch_description(job.url)
 
-                    description = await self._get_job_description_from_page()
-                    if description:
-                        job.description = description
-                        logger.info(f"Updated description for {job.title} ({len(description)} chars)")
-                    else:
-                        logger.warning(f"Could not extract description for {job.title}")
+                if description:
+                    job.description = description
+                    logger.info(f"Updated description for {job.title} ({len(description)} chars)")
+                else:
+                    logger.warning(f"Could not extract description for {job.title}")
 
-                    await self.random_delay(1, 2)  # Shorter delay for second pass
+                # Small delay between requests (curl_cffi is fast, no need for long delays)
+                import asyncio
+                await asyncio.sleep(0.5)
 
             except Exception as e:
                 logger.error(f"Error fetching details for {job.title}: {e}")

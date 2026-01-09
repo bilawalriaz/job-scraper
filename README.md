@@ -6,6 +6,7 @@ A stealthy multi-site job scraper with web interface, designed for DevOps/SRE/Cl
 
 ### Core Functionality
 - **Stealth Mode**: Advanced anti-detection with user agent rotation, browser fingerprint masking, realistic mouse/scroll behavior
+- **Full Description Fetching**: Uses curl_cffi to bypass TLS fingerprinting for complete job descriptions
 - **Smart Deduplication**: Detects duplicate postings (same company + title + location) and doesn't overwrite user-edited entries
 - **Rate Limiting**: Built-in rate limiting (max 10 scrapes/hour per source) to avoid blocks
 - **Web Interface**: Clean HTMX + Jinja2 frontend for managing jobs and searches
@@ -130,6 +131,7 @@ job-scraper/
 │   └── schema.py           # Database schema & operations
 ├── scrapers/
 │   ├── base.py             # Base scraper with stealth mode
+│   ├── description_fetcher.py  # Full description fetching via curl_cffi
 │   └── totaljobs.py        # TotalJobs implementation
 ├── data/                   # SQLite database (created at runtime)
 ├── Dockerfile
@@ -184,6 +186,7 @@ The scraper uses multiple anti-detection techniques:
 3. **Human-like Behavior**: Random delays, mouse movements, scroll patterns
 4. **Rate Limiting**: Minimum 2-5 seconds between requests
 5. **Geolocation Spoofing**: London timezone/locale
+6. **TLS Fingerprint Bypass**: Uses curl_cffi to fetch full descriptions from sites with TLS fingerprinting protection (like TotalJobs)
 
 ## Rate Limiting
 
@@ -281,6 +284,12 @@ gunicorn -w 4 -b 0.0.0.0:5000 api.app:app
 ```
 
 ## Changelog
+
+### v1.2.0 (2026-01-09)
+- **Added curl_cffi integration**: Bypasses TLS fingerprinting for full job descriptions
+- **New DescriptionFetcher module**: Fetches complete descriptions using browser TLS impersonation
+- **Updated TotalJobsDetailedScraper**: Now uses curl_cffi for full description fetching
+- **Fixed ERR_HTTP2_PROTOCOL_ERROR**: Can now fetch full descriptions from TotalJobs and similar protected sites
 
 ### v1.1.0 (2026-01-09)
 - **Fixed TotalJobs pagination**: Added robust click handling with force=True and href fallback navigation

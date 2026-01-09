@@ -4,10 +4,15 @@ Flask==3.0.0
 # HTTP Client (for API calls)
 requests==2.31.0
 
+# TLS Fingerprint Bypass (for full job descriptions)
+curl_cffi>=0.14.0
+beautifulsoup4>=4.9.0
+lxml>=4.9.0
+
 # Async Support
 asyncio==3.4.3
 
-# Web Scraping
+# Web Scraping (for search results)
 playwright==1.48.0
 
 # Database (built-in sqlite3)
