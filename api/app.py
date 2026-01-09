@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from functools import wraps
-from flask import Flask, render_template, request, jsonify, redirect, url_for, Response, stream_with_context
+from flask import Flask, render_template, request, jsonify, redirect, url_for, Response, stream_with_context, send_from_directory, abort
 from queue import Queue
 import threading
 import sys
@@ -20,6 +20,9 @@ from scrapers.totaljobs import TotalJobsDetailedScraper
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
 app.config['DB_PATH'] = os.environ.get('DB_PATH', 'data/jobs.db')
+
+# Frontend build directory (React app)
+FRONTEND_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
 
 # Ensure data directory exists
 Path(app.config['DB_PATH']).parent.mkdir(parents=True, exist_ok=True)
@@ -78,10 +81,11 @@ def async_wrapper(coro):
     return wrapper
 
 
-# Template Routes
-@app.route('/')
+# Legacy Template Routes (moved to /legacy/ prefix)
+# These are kept for backward compatibility if frontend is not built
+@app.route('/legacy/')
 def index():
-    """Dashboard home."""
+    """Dashboard home (legacy template)."""
     db = get_db()
     stats = db.get_stats()
     recent_jobs = db.get_jobs(limit=10)
@@ -90,9 +94,9 @@ def index():
     return render_template('index.html', stats=stats, recent_jobs=recent_jobs, configs=configs, logs=logs)
 
 
-@app.route('/jobs')
+@app.route('/legacy/jobs')
 def jobs_list():
-    """Jobs list page with filters."""
+    """Jobs list page with filters (legacy template)."""
     db = get_db()
     page = int(request.args.get('page', 1))
     per_page = int(request.args.get('per_page', 25))
@@ -120,9 +124,9 @@ def jobs_list():
                          filters=filters)
 
 
-@app.route('/jobs/<int:job_id>')
+@app.route('/legacy/jobs/<int:job_id>')
 def job_detail(job_id):
-    """Job detail page."""
+    """Job detail page (legacy template)."""
     db = get_db()
     job = db.get_job(job_id)
     if not job:
@@ -130,20 +134,21 @@ def job_detail(job_id):
     return render_template('job_detail.html', job=job)
 
 
-@app.route('/configs')
+@app.route('/legacy/configs')
 def configs_list():
-    """Search configurations page."""
+    """Search configurations page (legacy template)."""
     db = get_db()
     configs = db.get_search_configs()
     return render_template('configs.html', configs=configs)
 
 
-@app.route('/logs')
+@app.route('/legacy/logs')
 def logs_list():
-    """Scraping logs page."""
+    """Scraping logs page (legacy template)."""
     db = get_db()
     logs = db.get_recent_scrape_log(limit=50)
     return render_template('logs.html', logs=logs)
+
 
 
 # HTMX Endpoints
@@ -433,12 +438,14 @@ def api_jobs():
 
     jobs = db.get_jobs(filters=filters, limit=per_page, offset=offset)
     total = db.get_jobs_count(filters=filters)
+    total_pages = (total + per_page - 1) // per_page
 
     return jsonify({
         'jobs': jobs,
         'total': total,
         'page': page,
-        'per_page': per_page
+        'per_page': per_page,
+        'total_pages': total_pages
     })
 
 
@@ -476,7 +483,7 @@ def api_configs():
     """API: Get search configs."""
     db = get_db()
     configs = db.get_search_configs()
-    return jsonify([c.to_dict() for c in configs])
+    return jsonify({'configs': [c.to_dict() for c in configs]})
 
 
 @app.route('/api/configs', methods=['POST'])
@@ -614,7 +621,7 @@ def api_logs():
     """API: Get scrape logs."""
     db = get_db()
     limit = int(request.args.get('limit', 50))
-    return jsonify(db.get_recent_scrape_log(limit=limit))
+    return jsonify({'logs': db.get_recent_scrape_log(limit=limit)})
 
 
 @app.route('/api/console-logs/stream')
@@ -650,5 +657,28 @@ def get_console_logs():
         return jsonify(log_buffer[-50:])  # Return last 50 logs
 
 
+# React Frontend Serving
+# These routes serve the built React app for all non-API routes
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    """Serve React frontend for all non-API routes."""
+    # Skip if path starts with api/, htmx/, or legacy/ (handled by other routes)
+    if path.startswith('api/') or path.startswith('htmx/') or path.startswith('legacy'):
+        return abort(404)
+    
+    # Check if frontend build exists
+    if not os.path.exists(FRONTEND_DIR):
+        # Fallback to legacy template routes if frontend not built
+        return redirect(url_for('index'))
+    
+    # Serve static files directly if they exist
+    if path and os.path.exists(os.path.join(FRONTEND_DIR, path)):
+        return send_from_directory(FRONTEND_DIR, path)
+    
+    # For all other routes, serve index.html (SPA routing)
+    return send_from_directory(FRONTEND_DIR, 'index.html')
+
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=8000, debug=True)

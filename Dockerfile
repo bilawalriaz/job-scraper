@@ -1,3 +1,12 @@
+# Stage 1: Build React frontend
+FROM node:20-slim AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Python application
 FROM python:3.11-slim
 
 # Set working directory
@@ -41,6 +50,9 @@ RUN playwright install chromium
 # Copy application files
 COPY . .
 
+# Copy built frontend from builder stage
+COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
+
 # Create data directory for database
 RUN mkdir -p /app/data
 
@@ -49,11 +61,11 @@ ENV PYTHONUNBUFFERED=1
 ENV DB_PATH=/app/data/jobs.db
 
 # Expose port
-EXPOSE 5000
+EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5000/api/stats')"
+    CMD python -c "import requests; requests.get('http://localhost:8000/api/stats')"
 
 # Run the application
 CMD ["python", "api/app.py"]

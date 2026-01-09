@@ -1,29 +1,20 @@
-version: '3.8'
-
 services:
+  # Production: Single container with built frontend
   web:
     build: .
     container_name: job-scraper
     ports:
-      - "5000:5000"
+      - "8000:8000"
     volumes:
       # Persist database
       - ./data:/app/data
-      # Optional: Mount local code for development
-      # - ./api:/app/api
-      # - ./scrapers:/app/scrapers
-      # - ./database:/app/database
     environment:
       - DB_PATH=/app/data/jobs.db
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
-    # Optional: Add cron-like scheduling
-    # command: >
-    #   sh -c "python api/app.py &
-    #   while true; do sleep 3600; curl -X POST http://localhost:5000/api/scrape; done"
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/api/stats')"]
+      test: [ "CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/stats')" ]
       interval: 30s
       timeout: 10s
       retries: 3

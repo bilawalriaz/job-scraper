@@ -88,3 +88,7 @@ temp/
 *.tar
 *.zip
 Crash Reports/
+
+# Node/Frontend
+node_modules/
+frontend/dist/
