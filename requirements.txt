@@ -19,3 +19,6 @@ playwright==1.48.0
 
 # Utilities
 python-dotenv==1.0.0
+
+# LLM Integration (NVIDIA NIM)
+openai>=1.0.0

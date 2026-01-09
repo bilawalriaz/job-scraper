@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getJob, updateJob, deleteJob } from '../api/client';
+import { getJob, updateJob, deleteJob, processWithLLM } from '../api/client';
 import { Card, CardHeader, CardBody } from '../components/Card';
 import Button from '../components/Button';
 import Spinner from '../components/Spinner';
 import { StatusBadge } from '../components/StatusBadge';
-import { ExternalLinkIcon, EditIcon, DeleteIcon, CheckIcon, BriefcaseIcon, LocationIcon } from '../components/Icons';
+import { ExternalLinkIcon, EditIcon, DeleteIcon, CheckIcon, BriefcaseIcon, LocationIcon, SearchIcon, RefreshIcon } from '../components/Icons';
 
 function JobDetail() {
     const { id } = useParams();
@@ -16,6 +16,8 @@ function JobDetail() {
     const [descriptionExpanded, setDescriptionExpanded] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editForm, setEditForm] = useState({});
+    const [llmProcessing, setLLMProcessing] = useState(false);
+    const [showOriginalDesc, setShowOriginalDesc] = useState(false);
 
     useEffect(() => {
         loadJob();
@@ -88,6 +90,23 @@ function JobDetail() {
             setSaving(false);
         }
     };
+
+    const handleProcessWithLLM = async () => {
+        setLLMProcessing(true);
+        try {
+            await processWithLLM({ job_id: id });
+            // Reload job to get the processed data
+            await loadJob();
+        } catch (error) {
+            console.error('Failed to process with LLM:', error);
+        } finally {
+            setLLMProcessing(false);
+        }
+    };
+
+    // Parse tags and entities from JSON strings
+    const parsedTags = job?.tags ? JSON.parse(job.tags) : [];
+    const parsedEntities = job?.entities ? JSON.parse(job.entities) : {};
 
     if (loading) {
         return (
@@ -220,12 +239,106 @@ function JobDetail() {
                                         </div>
                                     </div>
 
+                                    {/* Tags */}
+                                    {parsedTags.length > 0 && (
+                                        <div style={{ marginBottom: '24px' }}>
+                                            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '12px' }}>Tags</h3>
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                                                {parsedTags.map((tag, idx) => (
+                                                    <span key={idx} className="tag-badge">{tag}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Entities */}
+                                    {Object.keys(parsedEntities).length > 0 && (
+                                        <div style={{ marginBottom: '24px' }}>
+                                            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '12px' }}>Extracted Information</h3>
+                                            <div className="entities-grid">
+                                                {parsedEntities.technologies?.length > 0 && (
+                                                    <div className="entity-group">
+                                                        <small>Technologies</small>
+                                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                                            {parsedEntities.technologies.map((t, i) => (
+                                                                <span key={i} className="entity-tag tech">{t}</span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {parsedEntities.companies?.length > 0 && (
+                                                    <div className="entity-group">
+                                                        <small>Companies</small>
+                                                        <p>{parsedEntities.companies.join(', ')}</p>
+                                                    </div>
+                                                )}
+                                                {parsedEntities.locations?.length > 0 && (
+                                                    <div className="entity-group">
+                                                        <small>Locations</small>
+                                                        <p>{parsedEntities.locations.join(', ')}</p>
+                                                    </div>
+                                                )}
+                                                {parsedEntities.salary_info && (
+                                                    <div className="entity-group">
+                                                        <small>Salary Info</small>
+                                                        <p>{parsedEntities.salary_info}</p>
+                                                    </div>
+                                                )}
+                                                {parsedEntities.certifications?.length > 0 && (
+                                                    <div className="entity-group">
+                                                        <small>Certifications</small>
+                                                        <p>{parsedEntities.certifications.join(', ')}</p>
+                                                    </div>
+                                                )}
+                                                {parsedEntities.urls?.length > 0 && (
+                                                    <div className="entity-group">
+                                                        <small>URLs</small>
+                                                        <div>
+                                                            {parsedEntities.urls.map((url, i) => (
+                                                                <a key={i} href={url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', fontSize: '0.875rem', marginBottom: '4px' }}>{url}</a>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {parsedEntities.emails?.length > 0 && (
+                                                    <div className="entity-group">
+                                                        <small>Emails</small>
+                                                        <p>{parsedEntities.emails.join(', ')}</p>
+                                                    </div>
+                                                )}
+                                                {parsedEntities.contact_persons?.length > 0 && (
+                                                    <div className="entity-group">
+                                                        <small>Contact Persons</small>
+                                                        <p>{parsedEntities.contact_persons.join(', ')}</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* Description */}
                                     <div style={{ marginBottom: '32px' }}>
-                                        <h3 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '16px' }}>Description</h3>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                                            <h3 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>
+                                                {job.cleaned_description ? (showOriginalDesc ? 'Original Description' : 'Description') : 'Description'}
+                                            </h3>
+                                            {job.cleaned_description && (
+                                                <button
+                                                    className="toggle-btn"
+                                                    onClick={() => setShowOriginalDesc(!showOriginalDesc)}
+                                                >
+                                                    {showOriginalDesc ? 'Show AI Cleaned' : 'Show Original'}
+                                                </button>
+                                            )}
+                                        </div>
                                         <div
                                             className={`job-description ${descriptionExpanded ? 'expanded' : ''}`}
-                                            dangerouslySetInnerHTML={{ __html: job.description?.replace(/\n/g, '<br>') || 'No description available' }}
+                                            dangerouslySetInnerHTML={{
+                                                __html: (showOriginalDesc || !job.cleaned_description
+                                                    ? job.description
+                                                    : job.cleaned_description
+                                                )?.replace(/\n/g, '<br>') || 'No description available'
+                                            }}
                                         />
                                         <button
                                             className="show-more-btn"
@@ -245,6 +358,16 @@ function JobDetail() {
                                         <Button variant="secondary" onClick={() => setIsEditing(true)}>
                                             <EditIcon /> Edit
                                         </Button>
+                                        {job.has_full_description && !job.llm_processed && (
+                                            <Button
+                                                variant="secondary"
+                                                onClick={handleProcessWithLLM}
+                                                loading={llmProcessing}
+                                                disabled={llmProcessing}
+                                            >
+                                                <SearchIcon /> Process with AI
+                                            </Button>
+                                        )}
                                     </div>
                                 </>
                             )}

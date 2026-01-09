@@ -18,6 +18,7 @@ from scrapers.totaljobs import TotalJobsDetailedScraper
 from scrapers.reed import ReedScraper
 from scrapers.cvlibrary import CVLibraryScraper
 from scrapers.indeed import IndeedScraper
+from llm.processor import get_processor
 
 # Available scrapers configuration
 AVAILABLE_SCRAPERS = {
@@ -565,6 +566,98 @@ def api_refresh_status():
     db = get_db()
     partial_counts = db.get_partial_description_count()
     return jsonify(partial_counts)
+
+
+# LLM Processing Endpoints
+@app.route('/api/llm/process', methods=['POST'])
+def api_llm_process():
+    """
+    API: Process job descriptions with LLM.
+    Cleans descriptions, extracts tags and entities.
+    """
+    db = get_db()
+    data = request.get_json() or {}
+    limit = int(data.get('limit', 10))
+    job_id = data.get('job_id')  # Process specific job
+
+    app_logger.info(f"LLM processing requested (limit: {limit}, job_id: {job_id})")
+
+    try:
+        processor = get_processor()
+    except ValueError as e:
+        app_logger.error(f"LLM processor init failed: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+    # Get jobs to process
+    if job_id:
+        job = db.get_job(int(job_id))
+        if not job:
+            return jsonify({'success': False, 'error': 'Job not found'}), 404
+        jobs_to_process = [job]
+    else:
+        jobs_to_process = db.get_jobs_needing_llm_processing(limit=limit)
+
+    if not jobs_to_process:
+        return jsonify({
+            'success': True,
+            'message': 'No jobs need LLM processing',
+            'processed': 0,
+            'failed': 0
+        })
+
+    app_logger.info(f"Processing {len(jobs_to_process)} jobs with LLM...")
+
+    def progress_callback(current, total, title):
+        app_logger.info(f"[LLM] Processing {current}/{total}: {title[:50]}...")
+
+    stats = processor.process_jobs_batch(jobs_to_process, progress_callback)
+
+    # Update database with results
+    for job in jobs_to_process:
+        if 'llm_result' in job:
+            result = job['llm_result']
+            db.update_job_llm_data(
+                job['id'],
+                result['cleaned_description'],
+                result['tags'],
+                result['entities']
+            )
+
+    app_logger.info(f"LLM processing complete: {stats['processed']} processed, {stats['failed']} failed")
+
+    return jsonify({
+        'success': True,
+        'processed': stats['processed'],
+        'failed': stats['failed'],
+        'skipped': stats['skipped'],
+        'message': f"Processed {stats['processed']} jobs with LLM"
+    })
+
+
+@app.route('/api/llm/status', methods=['GET'])
+def api_llm_status():
+    """
+    API: Get LLM processing status.
+    Returns count of pending jobs and rate limit status.
+    """
+    db = get_db()
+    processing_count = db.get_llm_processing_count()
+
+    try:
+        processor = get_processor()
+        rate_status = processor.get_rate_limit_status()
+    except ValueError:
+        rate_status = {'error': 'LLM processor not initialized'}
+
+    return jsonify({
+        'pending': processing_count['pending'],
+        'processed': processing_count['processed'],
+        'total': processing_count['total'],
+        'rate_limit': rate_status
+    })
 
 
 # React Frontend Serving

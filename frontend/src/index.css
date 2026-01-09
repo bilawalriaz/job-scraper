@@ -950,3 +950,82 @@ code {
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* Tags */
+.tag-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: 100px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: rgba(249, 115, 22, 0.1);
+    color: #ea580c;
+    font-family: var(--font-mono);
+}
+
+/* Entities */
+.entities-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: var(--radius-md);
+}
+
+.entity-group {
+    padding: 12px;
+    background: var(--bg-white);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.entity-group small {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+}
+
+.entity-group p {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.entity-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin: 2px;
+}
+
+.entity-tag.tech {
+    background: rgba(59, 130, 246, 0.1);
+    color: #2563eb;
+}
+
+/* Toggle Button */
+.toggle-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.toggle-btn:hover {
+    background: rgba(0, 0, 0, 0.03);
+    color: var(--text-primary);
+}

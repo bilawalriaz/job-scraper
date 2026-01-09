@@ -152,3 +152,20 @@ export async function refreshDescriptions(options = {}) {
 export async function getRefreshStatus() {
     return fetchAPI('/jobs/refresh-status');
 }
+
+/**
+ * Process job descriptions with LLM
+ */
+export async function processWithLLM(options = {}) {
+    return fetchAPI('/llm/process', {
+        method: 'POST',
+        body: JSON.stringify(options),
+    });
+}
+
+/**
+ * Get LLM processing status
+ */
+export async function getLLMStatus() {
+    return fetchAPI('/llm/status');
+}

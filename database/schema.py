@@ -117,6 +117,20 @@ class JobDatabase:
         except sqlite3.OperationalError:
             pass  # Column already exists
 
+        # Migration: Add LLM processing fields
+        llm_columns = [
+            ("cleaned_description", "TEXT"),
+            ("tags", "TEXT"),  # JSON array
+            ("entities", "TEXT"),  # JSON object
+            ("llm_processed", "BOOLEAN DEFAULT 0"),
+        ]
+        for col_name, col_type in llm_columns:
+            try:
+                self.conn.execute(f"ALTER TABLE jobs ADD COLUMN {col_name} {col_type}")
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
         # Search configs table
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS search_configs (
@@ -622,6 +636,57 @@ class JobDatabase:
             self.conn.commit()
             return True
         except sqlite3.Error:
+            return False
+
+    def get_jobs_needing_llm_processing(self, limit: int = 100) -> List[Dict]:
+        """Get jobs that have full descriptions but haven't been LLM processed yet."""
+        cursor = self.conn.execute("""
+            SELECT id, title, company, location, description, salary, job_type,
+                   posted_date, url, source, scraped_at, employment_type
+            FROM jobs
+            WHERE has_full_description = 1
+            AND (llm_processed = 0 OR llm_processed IS NULL)
+            AND description IS NOT NULL
+            AND description != ''
+            ORDER BY scraped_at DESC
+            LIMIT ?
+        """, (limit,))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_llm_processing_count(self) -> Dict:
+        """Get count of jobs needing LLM processing."""
+        cursor = self.conn.execute("""
+            SELECT COUNT(*) as pending FROM jobs
+            WHERE has_full_description = 1
+            AND (llm_processed = 0 OR llm_processed IS NULL)
+            AND description IS NOT NULL AND description != ''
+        """)
+        pending = cursor.fetchone()['pending']
+
+        cursor = self.conn.execute("""
+            SELECT COUNT(*) as processed FROM jobs
+            WHERE llm_processed = 1
+        """)
+        processed = cursor.fetchone()['processed']
+
+        return {'pending': pending, 'processed': processed, 'total': pending + processed}
+
+    def update_job_llm_data(self, job_id: int, cleaned_description: str, tags: str, entities: str) -> bool:
+        """Update a job with LLM processed data."""
+        try:
+            self.conn.execute("""
+                UPDATE jobs SET
+                    cleaned_description = ?,
+                    tags = ?,
+                    entities = ?,
+                    llm_processed = 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (cleaned_description, tags, entities, job_id))
+            self.conn.commit()
+            return True
+        except sqlite3.Error as e:
+            print(f"Error updating LLM data: {e}")
             return False
 
     def close(self):

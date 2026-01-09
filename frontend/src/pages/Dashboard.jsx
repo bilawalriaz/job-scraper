@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { getStats, getJobs, getConfigs, runScraper, getRateLimitStatus, resetRateLimit, refreshDescriptions, getRefreshStatus } from '../api/client';
+import { getStats, getJobs, getConfigs, runScraper, getRateLimitStatus, resetRateLimit, refreshDescriptions, getRefreshStatus, processWithLLM, getLLMStatus } from '../api/client';
 import { Card, CardHeader, CardBody } from '../components/Card';
 import Button from '../components/Button';
 import Console from '../components/Console';
@@ -20,21 +20,26 @@ function Dashboard() {
     const [refreshStatus, setRefreshStatus] = useState(null);
     const [refreshing, setRefreshing] = useState(false);
     const [refreshResult, setRefreshResult] = useState(null);
+    const [llmStatus, setLLMStatus] = useState(null);
+    const [llmProcessing, setLLMProcessing] = useState(false);
+    const [llmResult, setLLMResult] = useState(null);
 
     const loadData = useCallback(async () => {
         try {
-            const [statsData, jobsData, configsData, rateLimitData, refreshData] = await Promise.all([
+            const [statsData, jobsData, configsData, rateLimitData, refreshData, llmData] = await Promise.all([
                 getStats(),
                 getJobs({ per_page: 10 }),
                 getConfigs(),
                 getRateLimitStatus(),
-                getRefreshStatus()
+                getRefreshStatus(),
+                getLLMStatus().catch(() => null)
             ]);
             setStats(statsData);
             setRecentJobs(jobsData.jobs || []);
             setConfigs(configsData.configs || []);
             setRateLimitStatus(rateLimitData);
             setRefreshStatus(refreshData);
+            setLLMStatus(llmData);
         } catch (error) {
             console.error('Failed to load dashboard data:', error);
         } finally {
@@ -49,7 +54,8 @@ function Dashboard() {
             Promise.all([
                 getStats().then(setStats),
                 getRateLimitStatus().then(setRateLimitStatus),
-                getRefreshStatus().then(setRefreshStatus)
+                getRefreshStatus().then(setRefreshStatus),
+                getLLMStatus().then(setLLMStatus).catch(() => {})
             ]).catch(console.error);
         }, 5000);
         return () => clearInterval(interval);
@@ -97,11 +103,29 @@ function Dashboard() {
         }
     };
 
+    const handleProcessLLM = async () => {
+        setLLMProcessing(true);
+        setLLMResult(null);
+        try {
+            const result = await processWithLLM({ limit: 20 });
+            setLLMResult(result);
+            // Reload data after processing
+            loadData();
+        } catch (error) {
+            setLLMResult({ error: error.message });
+        } finally {
+            setLLMProcessing(false);
+        }
+    };
+
     // Check if any source is rate limited
     const isAnyRateLimited = rateLimitStatus && Object.values(rateLimitStatus).some(s => s.limited);
 
     // Count of jobs needing full descriptions
     const partialCount = refreshStatus?.total || 0;
+
+    // Count of jobs needing LLM processing
+    const llmPendingCount = llmStatus?.pending || 0;
 
     if (loading) {
         return (
@@ -120,6 +144,18 @@ function Dashboard() {
                     <p className="page-subtitle">Monitor your job search activity</p>
                 </div>
                 <div className="page-header-actions">
+                    {llmPendingCount > 0 && (
+                        <Button
+                            variant="secondary"
+                            onClick={handleProcessLLM}
+                            loading={llmProcessing}
+                            disabled={llmProcessing}
+                            style={{ marginRight: '8px' }}
+                        >
+                            <SearchIcon />
+                            Process {llmPendingCount} with AI
+                        </Button>
+                    )}
                     {partialCount > 0 && (
                         <Button
                             variant="secondary"
@@ -129,7 +165,7 @@ function Dashboard() {
                             style={{ marginRight: '8px' }}
                         >
                             <DownloadIcon />
-                            Refresh {partialCount} Partial {partialCount === 1 ? 'Description' : 'Descriptions'}
+                            Refresh {partialCount} Partial
                         </Button>
                     )}
                     <Button variant="primary" onClick={handleRunScraper} loading={scraping} disabled={scraping}>
@@ -157,6 +193,17 @@ function Dashboard() {
                         `Error: ${refreshResult.error}`
                     ) : (
                         `Refresh complete! Updated ${refreshResult.updated || 0} job descriptions${refreshResult.failed > 0 ? ` (${refreshResult.failed} failed)` : ''}.`
+                    )}
+                </div>
+            )}
+
+            {/* LLM Result */}
+            {llmResult && (
+                <div className={`alert ${llmResult.error ? 'alert-error' : 'alert-success'}`}>
+                    {llmResult.error ? (
+                        `Error: ${llmResult.error}`
+                    ) : (
+                        `AI processing complete! Processed ${llmResult.processed || 0} jobs${llmResult.failed > 0 ? ` (${llmResult.failed} failed)` : ''}.`
                     )}
                 </div>
             )}
