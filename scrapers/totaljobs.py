@@ -1,11 +1,14 @@
 """TotalJobs scraper with stealth mode."""
 
 import re
+import logging
 from typing import List
 from urllib.parse import urlencode
 
 from scrapers.base import BaseScraper
 from database.schema import JobListing
+
+logger = logging.getLogger('scrapers.totaljobs')
 
 
 class TotalJobsScraper(BaseScraper):
@@ -30,7 +33,7 @@ class TotalJobsScraper(BaseScraper):
         search_url = f"{self.BASE_URL}/jobs?{urlencode(params)}"
 
         if not await self.navigate_with_retry(search_url):
-            print(f"Failed to load {search_url}")
+            logger.error(f"Failed to load {search_url}")
             return jobs
 
         # Wait for job listings to load - updated selector
@@ -38,7 +41,7 @@ class TotalJobsScraper(BaseScraper):
 
         # Extract job cards - updated selector
         job_cards = await self.page.query_selector_all('[data-at="job-item"]')
-        print(f"[*] Found {len(job_cards)} job cards on page")
+        logger.info(f"Found {len(job_cards)} job cards on page")
 
         for card in job_cards:
             try:
@@ -46,7 +49,7 @@ class TotalJobsScraper(BaseScraper):
                 if job_data:
                     jobs.append(job_data)
             except Exception as e:
-                print(f"Error extracting job: {e}")
+                logger.error(f"Error extracting job: {e}")
                 continue
 
         return jobs
@@ -123,7 +126,7 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
             return jobs[:max_jobs]
 
         # Fetch detailed descriptions for subset
-        print(f"[*] Fetching detailed info for {min(len(jobs), max_jobs)} jobs...")
+        logger.info(f"Fetching detailed info for {min(len(jobs), max_jobs)} jobs...")
         detailed_jobs = []
 
         for i, job in enumerate(jobs[:max_jobs]):
@@ -132,7 +135,7 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
                 continue
 
             try:
-                print(f"  [{i+1}/{min(len(jobs), max_jobs)}] Fetching: {job.title}")
+                logger.info(f"[{i+1}/{min(len(jobs), max_jobs)}] Fetching: {job.title}")
 
                 if await self.navigate_with_retry(job.url):
                     # Wait for job detail content - updated selector
@@ -147,7 +150,7 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
                     await self.random_delay(2, 4)  # Respectful delay
 
             except Exception as e:
-                print(f"    Error fetching details: {e}")
+                logger.error(f"Error fetching details for {job.title}: {e}")
                 detailed_jobs.append(job)  # Keep what we have
 
         return detailed_jobs

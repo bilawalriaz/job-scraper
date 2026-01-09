@@ -38,8 +38,10 @@
     {% endif %}
 </div>
 <script>
-// Refresh stats after scrape
+// Refresh stats and recent jobs after scrape
 setTimeout(() => {
     htmx.trigger('#stats-container', 'load');
-}, 1000);
+    // Reload page to show updated recent jobs
+    window.location.reload();
+}, 2000);
 </script>

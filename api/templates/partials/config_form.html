@@ -4,8 +4,8 @@
 </div>
 <form hx-post="{{ '/htmx/configs' if not config else '/htmx/configs/' ~ config.id }}"
       hx-target="#configs-table"
-      _="on htmx:beforeRequest show Loading in #config-modal-content
-         on htmx:afterRequest if detail.xhr.status == 200
+      _="on htmx:beforeRequest put '<div style=\"text-align:center;padding:40px;\"><div class=\"spinner\" style=\"width:40px;height:40px;margin:0 auto 16px;\"></div><p class=\"text-muted\">Saving...</p></div>' into #config-modal-content
+         on htmx:afterRequest if htmx.detail.xhr.status == 200
             remove .show from #config-modal
             then send htmx:load to #configs-table">
     <div class="modal-body">

@@ -24,6 +24,27 @@
 
 <div id="scrape-result"></div>
 
+<!-- Console Logs Card -->
+<div class="card" style="margin-bottom: 32px;">
+    <div class="card-header d-flex justify-between align-center">
+        <span style="display: flex; align-items: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+            </svg>
+            Console Output
+        </span>
+        <span class="status-badge" style="background: rgba(34, 197, 94, 0.12); color: #22c55e; font-size: 0.75rem;">
+            Live
+        </span>
+    </div>
+    <div class="card-body" style="padding: 0; background: #0d1117; border-radius: 0 0 var(--radius-md) var(--radius-md);">
+        <div id="console-logs" style="font-family: 'JetBrains Mono', monospace; font-size: 0.8125rem; padding: 16px; height: 200px; overflow-y: auto; color: #c9d1d9;">
+            <div style="color: #6e7681; font-style: italic;">Waiting for scraper output...</div>
+        </div>
+    </div>
+</div>
+
 <!-- Stats Grid -->
 <div class="row" id="stats-container" hx-get="/htmx/stats" hx-trigger="load, every:30s">
     <div class="htmx-indicator" style="text-align: center; padding: 40px;">
@@ -160,4 +181,85 @@
     margin-bottom: 32px;
 }
 </style>
+
+<script>
+(function() {
+    const consoleLogs = document.getElementById('console-logs');
+    if (!consoleLogs) return;
+
+    function formatLogEntry(log) {
+        const levelColors = {
+            'ERROR': '#ff6b6b',
+            'WARNING': '#feca57',
+            'INFO': '#54a0ff',
+            'DEBUG': '#8b9dc3'
+        };
+        const color = levelColors[log.level] || '#c9d1d9';
+        const timestamp = new Date(log.timestamp).toLocaleTimeString();
+
+        const entry = document.createElement('div');
+        entry.style.marginBottom = '4px';
+
+        const timeSpan = document.createElement('span');
+        timeSpan.style.color = '#6e7681';
+        timeSpan.textContent = `[${timestamp}]`;
+
+        const levelSpan = document.createElement('span');
+        levelSpan.style.color = color;
+        levelSpan.textContent = `[${log.level}]`;
+
+        const msgSpan = document.createElement('span');
+        msgSpan.style.color = '#c9d1d9';
+        msgSpan.textContent = ` ${log.message}`;
+
+        entry.appendChild(timeSpan);
+        entry.appendChild(levelSpan);
+        entry.appendChild(msgSpan);
+
+        return entry;
+    }
+
+    // Initial load
+    fetch('/api/console-logs')
+        .then(r => r.json())
+        .then(logs => {
+            if (logs.length > 0) {
+                consoleLogs.innerHTML = '';
+                logs.forEach(log => {
+                    consoleLogs.appendChild(formatLogEntry(log));
+                });
+                consoleLogs.scrollTop = consoleLogs.scrollHeight;
+            }
+        })
+        .catch(err => console.error('Failed to load logs:', err));
+
+    // SSE for live updates
+    const eventSource = new EventSource('/api/console-logs/stream');
+
+    eventSource.onmessage = function(event) {
+        const log = JSON.parse(event.data);
+
+        // Remove "waiting" message
+        const waiting = consoleLogs.querySelector('[style*="italic"]');
+        if (waiting) waiting.remove();
+
+        consoleLogs.appendChild(formatLogEntry(log));
+        consoleLogs.scrollTop = consoleLogs.scrollHeight;
+
+        // Keep DOM manageable
+        while (consoleLogs.children.length > 100) {
+            consoleLogs.removeChild(consoleLogs.firstChild);
+        }
+    };
+
+    eventSource.onerror = function(error) {
+        console.error('SSE error:', error);
+    };
+
+    // Cleanup
+    window.addEventListener('beforeunload', () => {
+        eventSource.close();
+    });
+})();
+</script>
 {% endblock %}

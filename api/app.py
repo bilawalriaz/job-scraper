@@ -2,12 +2,15 @@
 
 import os
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 from functools import wraps
-from flask import Flask, render_template, request, jsonify, redirect, url_for
-
+from flask import Flask, render_template, request, jsonify, redirect, url_for, Response, stream_with_context
+from queue import Queue
+import threading
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.schema import JobDatabase, JobListing, SearchConfig
@@ -20,6 +23,40 @@ app.config['DB_PATH'] = os.environ.get('DB_PATH', 'data/jobs.db')
 
 # Ensure data directory exists
 Path(app.config['DB_PATH']).parent.mkdir(parents=True, exist_ok=True)
+
+# Console log buffer for SSE streaming
+log_buffer = []
+log_buffer_lock = threading.Lock()
+MAX_LOG_ENTRIES = 100
+
+
+class LogHandler(logging.Handler):
+    """Custom logging handler to capture logs into buffer."""
+
+    def emit(self, record):
+        log_entry = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'level': record.levelname,
+            'message': self.format(record)
+        }
+        with log_buffer_lock:
+            log_buffer.append(log_entry)
+            if len(log_buffer) > MAX_LOG_ENTRIES:
+                log_buffer.pop(0)
+
+
+# Setup custom log handler
+log_handler = LogHandler()
+log_handler.setFormatter(logging.Formatter('%(name)s - %(message)s'))
+
+# Add handler to relevant loggers
+scrapers_logger = logging.getLogger('scrapers')
+scrapers_logger.addHandler(log_handler)
+scrapers_logger.setLevel(logging.INFO)
+
+app_logger = logging.getLogger('job_scraper_app')
+app_logger.addHandler(log_handler)
+app_logger.setLevel(logging.INFO)
 
 
 def get_db():
@@ -265,9 +302,12 @@ async def htmx_scrape():
     db = get_db()
     config_id = request.form.get('config_id')
 
+    app_logger.info(f"Starting scrape (config_id: {config_id})")
+
     # Rate limiting check
     last_hour_count = db.get_scrape_count_last_hour('totaljobs')
     if last_hour_count >= 10:
+        app_logger.warning("Rate limited: Max 10 scrapes per hour")
         return render_template('partials/scrape_result.html',
                              success=False,
                              message="Rate limited: Max 10 scrapes per hour")
@@ -277,11 +317,15 @@ async def htmx_scrape():
     if config_id:
         configs = [c for c in configs if c.id == int(config_id)]
 
+    if not configs:
+        app_logger.warning("No enabled configs found for scraping")
+
     results = []
     total_found = 0
     total_added = 0
 
     for config in configs:
+        app_logger.info(f"Scraping config: {config.name} (keywords: {config.keywords}, location: {config.location})")
         scraper = TotalJobsDetailedScraper(db, headless=True)
 
         try:
@@ -290,9 +334,13 @@ async def htmx_scrape():
                 location=config.location
             )
 
+            app_logger.info(f"Found {len(jobs)} jobs for {config.name}")
+
             stats = db.insert_jobs_batch(jobs)
             total_found += len(jobs)
             total_added += stats['added']
+
+            app_logger.info(f"Added {stats['added']} new jobs, updated {stats['updated']}, skipped {stats['skipped']}")
 
             db.log_scrape('totaljobs', config.id, len(jobs), stats['added'])
 
@@ -303,11 +351,14 @@ async def htmx_scrape():
             })
 
         except Exception as e:
+            app_logger.error(f"Error scraping {config.name}: {str(e)}")
             db.log_scrape('totaljobs', config.id, 0, 0, success=False, error_message=str(e))
             results.append({
                 'config': config.name,
                 'error': str(e)
             })
+
+    app_logger.info(f"Scrape complete: {total_found} found, {total_added} added")
 
     return render_template('partials/scrape_result.html',
                          success=True,
@@ -467,6 +518,36 @@ def api_logs():
     db = get_db()
     limit = int(request.args.get('limit', 50))
     return jsonify(db.get_recent_scrape_log(limit=limit))
+
+
+@app.route('/api/console-logs/stream')
+def stream_console_logs():
+    """SSE endpoint for streaming console logs."""
+    def generate():
+        client_last_index = 0
+        while True:
+            with log_buffer_lock:
+                buffer_len = len(log_buffer)
+                if buffer_len > client_last_index:
+                    # Send new logs
+                    for i in range(client_last_index, buffer_len):
+                        log_entry = log_buffer[i]
+                        yield f"data: {jsonify(log_entry).get_data(as_text=True)}\n\n"
+                    client_last_index = buffer_len
+            import time
+            time.sleep(0.5)  # Send updates every 0.5 seconds
+    return Response(stream_with_context(generate()),
+                   mimetype='text/event-stream',
+                   headers={'Cache-Control': 'no-cache',
+                           'Connection': 'keep-alive',
+                           'X-Accel-Buffering': 'no'})
+
+
+@app.route('/api/console-logs', methods=['GET'])
+def get_console_logs():
+    """API: Get current console logs (non-streaming)."""
+    with log_buffer_lock:
+        return jsonify(log_buffer[-50:])  # Return last 50 logs
 
 
 if __name__ == '__main__':

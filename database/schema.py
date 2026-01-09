@@ -73,8 +73,13 @@ class JobDatabase:
 
     def _init_db(self):
         """Initialize database schema."""
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn = sqlite3.connect(self.db_path, timeout=30.0)
         self.conn.row_factory = sqlite3.Row
+
+        # Enable WAL mode for better concurrent access
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=30000")
+        self.conn.execute("PRAGMA foreign_keys=ON")
 
         # Jobs table with edit tracking
         self.conn.execute("""
