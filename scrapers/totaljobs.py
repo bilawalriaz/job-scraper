@@ -143,15 +143,11 @@ class TotalJobsScraper(BaseScraper):
                 # Click the button
                 await next_button.click()
 
-                # Wait for either navigation OR job cards to appear (handles both cases)
-                try:
-                    await self.page.wait_for_load_state('networkidle', timeout=15000)
-                except:
-                    logger.info("Networkidle timeout, checking if jobs loaded anyway...")
+                # Human-like delay for page load (don't use networkidle - it times out)
+                await self.random_delay(3, 4)
 
-                # Additional wait for job cards to load
-                await self.page.wait_for_selector('[data-at="job-item"]', timeout=15000)
-                await self.random_delay(2, 3)  # Human-like delay between pages
+                # Wait for job cards to appear (confirmation of page load)
+                await self.page.wait_for_selector('[data-at="job-item"]', timeout=20000)
 
                 logger.info(f"Successfully navigated to page {page_num + 1}")
             except Exception as e:
