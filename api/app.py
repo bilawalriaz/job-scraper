@@ -377,6 +377,27 @@ async def htmx_scrape():
                     'error': str(e)
                 })
 
+        # Second pass: Fetch full descriptions for jobs with short descriptions
+        app_logger.info("Starting second pass: fetching full descriptions...")
+        jobs_needing_descriptions = db.get_jobs_needing_descriptions(limit=200, source='totaljobs')
+
+        if jobs_needing_descriptions:
+            app_logger.info(f"Fetching full descriptions for {len(jobs_needing_descriptions)} jobs...")
+
+            updated_jobs = await scraper.fetch_full_descriptions(jobs_needing_descriptions)
+
+            # Update descriptions in database
+            for job in updated_jobs:
+                # Find job ID by matching URL
+                cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
+                row = cursor.fetchone()
+                if row:
+                    db.update_job_description(row['id'], job.description)
+
+            app_logger.info(f"Updated descriptions for {len(updated_jobs)} jobs")
+        else:
+            app_logger.info("No jobs need full descriptions")
+
     except Exception as e:
         app_logger.error(f"Failed to initialize scraper: {str(e)}")
         return render_template('partials/scrape_result.html',
@@ -545,6 +566,27 @@ async def api_scrape():
                     'config': config.name,
                     'error': str(e)
                 })
+
+        # Second pass: Fetch full descriptions for jobs with short descriptions
+        app_logger.info("Starting second pass: fetching full descriptions...")
+        jobs_needing_descriptions = db.get_jobs_needing_descriptions(limit=200, source='totaljobs')
+
+        if jobs_needing_descriptions:
+            app_logger.info(f"Fetching full descriptions for {len(jobs_needing_descriptions)} jobs...")
+
+            updated_jobs = await scraper.fetch_full_descriptions(jobs_needing_descriptions)
+
+            # Update descriptions in database
+            for job in updated_jobs:
+                cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
+                row = cursor.fetchone()
+                if row:
+                    db.update_job_description(row['id'], job.description)
+
+            app_logger.info(f"Updated descriptions for {len(updated_jobs)} jobs")
+        else:
+            app_logger.info("No jobs need full descriptions")
+
     except Exception as e:
         app_logger.error(f"Failed to initialize scraper: {e}")
         return jsonify({'error': f'Failed to initialize browser: {str(e)}'}), 500

@@ -320,3 +320,43 @@ class TotalJobsDetailedScraper(TotalJobsScraper):
                 detailed_jobs.append(job)
 
         return detailed_jobs
+
+    async def fetch_full_descriptions(self, jobs: List[JobListing], max_jobs: int = None) -> List[JobListing]:
+        """
+        Fetch full descriptions for a list of jobs.
+        Useful for second-pass scraping after deduplication.
+
+        Args:
+            jobs: List of jobs to fetch descriptions for
+            max_jobs: Maximum number of jobs to process (None = all)
+        """
+        if max_jobs:
+            jobs = jobs[:max_jobs]
+
+        logger.info(f"Fetching full descriptions for {len(jobs)} jobs...")
+
+        for i, job in enumerate(jobs):
+            if not job.url:
+                logger.warning(f"Skipping {job.title} - no URL")
+                continue
+
+            try:
+                logger.info(f"[{i+1}/{len(jobs)}] Fetching: {job.title}")
+
+                if await self.navigate_with_retry(job.url):
+                    await self.page.wait_for_selector('[data-at="job-description"]', timeout=8000)
+
+                    desc_elem = await self.page.query_selector('[data-at="job-description"]')
+                    if desc_elem:
+                        job.description = await desc_elem.inner_text()
+                        logger.info(f"Updated description for {job.title} ({len(job.description)} chars)")
+                    else:
+                        logger.warning(f"No description element found for {job.title}")
+
+                    await self.random_delay(1, 2)  # Shorter delay for second pass
+
+            except Exception as e:
+                logger.error(f"Error fetching details for {job.title}: {e}")
+
+        logger.info(f"Completed fetching descriptions for {len(jobs)} jobs")
+        return jobs

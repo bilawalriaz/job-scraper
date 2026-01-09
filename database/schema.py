@@ -493,6 +493,57 @@ class JobDatabase:
         """, (source,))
         return cursor.fetchone()['count']
 
+    def get_jobs_needing_descriptions(self, limit: int = 100, source: str = None) -> List[JobListing]:
+        """Get jobs that have short descriptions (likely from card-only scraping)."""
+        query = """
+            SELECT id, title, company, location, description, salary, job_type,
+                   posted_date, url, source, scraped_at, employment_type
+            FROM jobs
+            WHERE length(description) < 500
+            AND url IS NOT NULL
+        """
+        params = []
+
+        if source:
+            query += " AND source = ?"
+            params.append(source)
+
+        query += " ORDER BY scraped_at DESC LIMIT ?"
+        params.append(limit)
+
+        cursor = self.conn.execute(query, params)
+
+        jobs = []
+        for row in cursor.fetchall():
+            job_dict = dict(row)
+            jobs.append(JobListing(
+                title=job_dict['title'],
+                company=job_dict['company'],
+                location=job_dict['location'],
+                description=job_dict['description'],
+                salary=job_dict.get('salary'),
+                job_type=job_dict.get('job_type'),
+                posted_date=job_dict.get('posted_date'),
+                url=job_dict['url'],
+                source=job_dict['source'],
+                scraped_at=job_dict['scraped_at'],
+                employment_type=job_dict.get('employment_type')
+            ))
+
+        return jobs
+
+    def update_job_description(self, job_id: int, description: str) -> bool:
+        """Update a job's description."""
+        try:
+            self.conn.execute(
+                "UPDATE jobs SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (description, job_id)
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.Error:
+            return False
+
     def close(self):
         """Close database connection."""
         if self.conn:
