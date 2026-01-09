@@ -80,24 +80,14 @@ class TotalJobsScraper(BaseScraper):
 
         logger.info(f"Searching with params: {params}")
 
-        # Paginate through results
+        # Load first page
+        search_url = f"{self.BASE_URL}/jobs?{urlencode(params)}"
+        if not await self.navigate_with_retry(search_url):
+            logger.error(f"Failed to load {search_url}")
+            return jobs
+
+        # Paginate through results by clicking Next button
         for page_num in range(1, max_pages + 1):
-            params['page'] = page_num
-            search_url = f"{self.BASE_URL}/jobs?{urlencode(params)}"
-
-            if page_num == 1:
-                if not await self.navigate_with_retry(search_url):
-                    logger.error(f"Failed to load {search_url}")
-                    return jobs
-            else:
-                # For subsequent pages, navigate directly
-                try:
-                    await self.page.goto(search_url, wait_until='domcontentloaded', timeout=30000)
-                    await self.random_delay(1, 2)
-                except Exception as e:
-                    logger.warning(f"Failed to load page {page_num}: {e}")
-                    break
-
             # Wait for job listings to load
             try:
                 await self.page.wait_for_selector('[data-at="job-item"]', timeout=10000)
@@ -122,34 +112,37 @@ class TotalJobsScraper(BaseScraper):
                     logger.error(f"Error extracting job: {e}")
                     continue
 
-            # Check if there's a next page - try multiple selectors
-            next_button = await self.page.query_selector('[data-at="pagination-next"]')
-            if not next_button:
-                # Try alternative selectors
-                next_button = await self.page.query_selector('a[aria-label="Next"]')
-            if not next_button:
-                next_button = await self.page.query_selector('li.pagination-next a')
-            if not next_button:
-                next_button = await self.page.query_selector('a.next')
+            # Check if there's a next page button - try multiple selectors
+            next_button = (
+                await self.page.query_selector('[data-at="pagination-next"]') or
+                await self.page.query_selector('a[aria-label="Next"]') or
+                await self.page.query_selector('li.pagination-next a') or
+                await self.page.query_selector('a.next')
+            )
 
-            if next_button:
-                # Check if button is disabled by looking for common indicators
-                is_disabled = False
-                class_list = await next_button.get_attribute('class') or ''
-                aria_disabled = await next_button.get_attribute('aria-disabled')
-                href = await next_button.get_attribute('href')
-
-                if 'disabled' in class_list.lower() or aria_disabled == 'true' or not href or href == '#':
-                    is_disabled = True
-
-                if is_disabled:
-                    logger.info(f"Next button is disabled, stopping at page {page_num}")
-                    break
-            else:
+            if not next_button:
                 logger.info(f"No next page button found, stopping at page {page_num}")
                 break
 
-            logger.info(f"Scraped {len(jobs)} jobs so far, moving to next page...")
+            # Check if button is disabled
+            is_disabled = False
+            class_list = await next_button.get_attribute('class') or ''
+            aria_disabled = await next_button.get_attribute('aria-disabled')
+
+            if 'disabled' in class_list.lower() or aria_disabled == 'true':
+                logger.info(f"Next button is disabled, stopping at page {page_num}")
+                break
+
+            # Click next button to navigate naturally (avoids anti-bot detection)
+            logger.info(f"Clicking next button to go to page {page_num + 1}...")
+            try:
+                await next_button.click()
+                # Wait for navigation and new content to load
+                await self.page.wait_for_load_state('networkidle', timeout=30000)
+                await self.random_delay(2, 3)  # Human-like delay between pages
+            except Exception as e:
+                logger.warning(f"Failed to click next button: {e}")
+                break
 
         logger.info(f"Total jobs scraped: {len(jobs)}")
         return jobs
