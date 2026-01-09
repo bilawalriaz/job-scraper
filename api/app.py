@@ -350,7 +350,7 @@ async def htmx_scrape():
                     location=config.location,
                     radius=config.radius,
                     employment_types=config.employment_types or None,
-                    max_pages=5  # Scrape up to 5 pages per config
+                    max_pages=20  # Scrape up to 20 pages per config (500 jobs)
                 )
 
                 app_logger.info(f"Found {len(jobs)} jobs for {config.name}")
@@ -527,7 +527,7 @@ async def api_scrape():
                     config.location,
                     radius=config.radius,
                     employment_types=config.employment_types or None,
-                    max_pages=5
+                    max_pages=20
                 )
                 stats = db.insert_jobs_batch(jobs)
                 total_found += len(jobs)
