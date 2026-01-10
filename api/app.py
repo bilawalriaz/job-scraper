@@ -553,7 +553,8 @@ async def api_refresh_descriptions():
             # Only mark as full if description is substantial (500+ chars) AND actually changed
             orig_len = original_descs.get(job.url, 0)
             if job.description and len(job.description) > 500 and len(job.description) > orig_len:
-                success = db.update_job_description(job_id, job.description, mark_full=True)
+                # Update by URL to handle all duplicates at once
+                success = db.update_job_description(job_id, job.description, mark_full=True, url=job.url)
                 if success:
                     updated_count += 1
                     app_logger.info(f"Updated description for: {job.title[:40]} ({len(job.description)} chars)")
@@ -840,24 +841,18 @@ def create_descriptions_executor(db_path: str):
             try:
                 description = fetcher.fetch_description(job.url, source=job.source)
 
-                # Find job ID
-                cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
-                row = cursor.fetchone()
-
-                if not row:
-                    app_logger.warning(f"[Scheduler] Job not found in DB: {job.url}")
-                    failed += 1
-                    continue
-
-                job_id = row['id']
-
                 if description == DescriptionFetcher.EXPIRED:
-                    # Job listing no longer exists - mark as expired
-                    db.mark_job_expired(job_id)
+                    # Job listing no longer exists - mark as expired (by URL to handle duplicates)
+                    # Find one job ID for this URL
+                    cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
+                    row = cursor.fetchone()
+                    if row:
+                        db.mark_job_expired(row['id'])
                     expired += 1
                     app_logger.info(f"[Scheduler] Marked job as expired: {job.title}")
                 elif description and len(description) > 500:
-                    success = db.update_job_description(job_id, description, mark_full=True)
+                    # Update by URL to handle all duplicates at once
+                    success = db.update_job_description(None, description, mark_full=True, url=job.url)
                     if success:
                         updated += 1
                         app_logger.info(f"[Scheduler] Updated description for: {job.title[:40]} ({len(description)} chars)")

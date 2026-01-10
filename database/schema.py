@@ -632,32 +632,42 @@ class JobDatabase:
 
         return result
 
-    def update_job_description(self, job_id: int, description: str, mark_full: bool = True) -> bool:
-        """Update a job's description and optionally mark as having full description."""
+    def update_job_description(self, job_id: int, description: str, mark_full: bool = True, url: str = None) -> bool:
+        """Update a job's description and optionally mark as having full description.
+
+        If url is provided, updates ALL jobs with that URL (handles duplicates).
+        """
         try:
-            # First get the URL for this job
-            cursor = self.conn.execute("SELECT url FROM jobs WHERE id = ?", (job_id,))
-            row = cursor.fetchone()
-            if not row:
-                return False
-
-            url = row['url']
-
-            if mark_full:
+            if url:
                 # Update ALL jobs with this URL (handles duplicates)
-                self.conn.execute(
-                    """UPDATE jobs SET description = ?, has_full_description = 1,
-                       updated_at = CURRENT_TIMESTAMP WHERE url = ?""",
-                    (description, url)
-                )
+                if mark_full:
+                    self.conn.execute(
+                        """UPDATE jobs SET description = ?, has_full_description = 1,
+                           updated_at = CURRENT_TIMESTAMP WHERE url = ?""",
+                        (description, url)
+                    )
+                else:
+                    self.conn.execute(
+                        "UPDATE jobs SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE url = ?",
+                        (description, url)
+                    )
             else:
-                self.conn.execute(
-                    "UPDATE jobs SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE url = ?",
-                    (description, url)
-                )
+                # Update just this job by ID
+                if mark_full:
+                    self.conn.execute(
+                        """UPDATE jobs SET description = ?, has_full_description = 1,
+                           updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                        (description, job_id)
+                    )
+                else:
+                    self.conn.execute(
+                        "UPDATE jobs SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (description, job_id)
+                    )
             self.conn.commit()
             return True
-        except sqlite3.Error:
+        except sqlite3.Error as e:
+            print(f"update_job_description error: {e}")
             return False
 
     def mark_job_full_description(self, job_id: int) -> bool:
