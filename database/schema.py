@@ -593,9 +593,17 @@ class JobDatabase:
     def mark_job_expired(self, job_id: int) -> bool:
         """Mark a job as expired (listing no longer available)."""
         try:
+            # Get URL first to mark all duplicates as expired
+            cursor = self.conn.execute("SELECT url FROM jobs WHERE id = ?", (job_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+
+            url = row['url']
+            # Mark ALL jobs with this URL as expired (handles duplicates)
             self.conn.execute(
-                "UPDATE jobs SET is_expired = 1, status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (job_id,)
+                "UPDATE jobs SET is_expired = 1, has_full_description = 1, status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE url = ?",
+                (url,)
             )
             self.conn.commit()
             return True
@@ -627,16 +635,25 @@ class JobDatabase:
     def update_job_description(self, job_id: int, description: str, mark_full: bool = True) -> bool:
         """Update a job's description and optionally mark as having full description."""
         try:
+            # First get the URL for this job
+            cursor = self.conn.execute("SELECT url FROM jobs WHERE id = ?", (job_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+
+            url = row['url']
+
             if mark_full:
+                # Update ALL jobs with this URL (handles duplicates)
                 self.conn.execute(
                     """UPDATE jobs SET description = ?, has_full_description = 1,
-                       updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
-                    (description, job_id)
+                       updated_at = CURRENT_TIMESTAMP WHERE url = ?""",
+                    (description, url)
                 )
             else:
                 self.conn.execute(
-                    "UPDATE jobs SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (description, job_id)
+                    "UPDATE jobs SET description = ?, updated_at = CURRENT_TIMESTAMP WHERE url = ?",
+                    (description, url)
                 )
             self.conn.commit()
             return True
