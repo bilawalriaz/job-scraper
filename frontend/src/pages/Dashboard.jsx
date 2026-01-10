@@ -55,7 +55,7 @@ function Dashboard() {
                 getStats().then(setStats),
                 getRateLimitStatus().then(setRateLimitStatus),
                 getRefreshStatus().then(setRefreshStatus),
-                getLLMStatus().then(setLLMStatus).catch(() => {})
+                getLLMStatus().then(setLLMStatus).catch(() => { })
             ]).catch(console.error);
         }, 5000);
         return () => clearInterval(interval);
@@ -92,7 +92,7 @@ function Dashboard() {
         setRefreshing(true);
         setRefreshResult(null);
         try {
-            const result = await refreshDescriptions({ limit: 50 });
+            const result = await refreshDescriptions();
             setRefreshResult(result);
             // Reload data after refresh
             loadData();

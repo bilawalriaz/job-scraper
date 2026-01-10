@@ -111,7 +111,7 @@ class KeyRotator:
 class JobDescriptionProcessor:
     """Processes job descriptions using NVIDIA NIM LLM."""
 
-    MODEL = "moonshotai/kimi-k2-thinking"
+    MODEL = "moonshotai/kimi-k2-instruct-0905"
     BASE_URL = "https://integrate.api.nvidia.com/v1"
 
     SYSTEM_PROMPT = """You are a job description processor. Your task is to analyze job descriptions and produce structured output.
@@ -197,14 +197,13 @@ Description:
                 ],
                 temperature=0.3,
                 top_p=0.9,
-                max_tokens=16384,
+                max_tokens=4096,
                 stream=True
             )
 
             # Collect response
             full_response = ""
             for chunk in completion:
-                # Skip reasoning content, only collect final response
                 if chunk.choices[0].delta.content:
                     full_response += chunk.choices[0].delta.content
 

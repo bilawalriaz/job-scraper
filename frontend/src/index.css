@@ -715,10 +715,9 @@ footer {
     max-height: 200px;
     overflow: hidden;
     transition: max-height 0.3s ease;
-    line-height: 1.7;
+    line-height: 1.6;
     font-size: 0.9375rem;
     color: var(--text-secondary);
-    white-space: pre-wrap;
     word-wrap: break-word;
 }
 
@@ -729,7 +728,7 @@ footer {
 /* Typography within job descriptions */
 .job-description p,
 .job-description div {
-    margin-bottom: 1em;
+    margin-bottom: 0.75em;
 }
 
 .job-description ul,
@@ -742,23 +741,104 @@ footer {
     margin-bottom: 0.5em;
 }
 
-.job-description h1,
-.job-description h2,
-.job-description h3,
-.job-description h4,
-.job-description h5,
-.job-description h6,
-.job-description strong,
-.job-description b {
+.job-description h1 {
+    font-size: 1.5rem;
+    color: var(--text-primary);
+    font-weight: 700;
+    margin-top: 1.5em;
+    margin-bottom: 0.75em;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.5em;
+}
+
+.job-description h2 {
+    font-size: 1.25rem;
     color: var(--text-primary);
     font-weight: 600;
     margin-top: 1.25em;
     margin-bottom: 0.5em;
 }
 
+.job-description h3 {
+    font-size: 1.125rem;
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-top: 1.25em;
+    margin-bottom: 0.5em;
+}
+
+.job-description h4,
+.job-description h5,
+.job-description h6 {
+    font-size: 1rem;
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+
+.job-description strong,
+.job-description b {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
 .job-description a {
     color: var(--accent-orange);
     text-decoration: underline;
+}
+
+.job-description code {
+    background: rgba(0, 0, 0, 0.05);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+}
+
+.job-description pre {
+    background: rgba(0, 0, 0, 0.05);
+    padding: 16px;
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+    margin: 1em 0;
+}
+
+.job-description pre code {
+    background: none;
+    padding: 0;
+}
+
+.job-description blockquote {
+    border-left: 4px solid var(--accent-orange);
+    padding-left: 16px;
+    margin: 1em 0;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.job-description hr {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 1.5em 0;
+}
+
+.job-description table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+}
+
+.job-description th,
+.job-description td {
+    border: 1px solid var(--border-color);
+    padding: 8px 12px;
+    text-align: left;
+}
+
+.job-description th {
+    background: rgba(0, 0, 0, 0.03);
+    font-weight: 600;
 }
 
 .job-description br {

@@ -3,6 +3,7 @@
 import os
 import asyncio
 import logging
+import json
 from datetime import datetime
 from pathlib import Path
 from functools import wraps
@@ -444,7 +445,7 @@ async def api_refresh_descriptions():
     db = get_db()
     data = request.get_json() or {}
     source = data.get('source')  # Filter by source (e.g., 'totaljobs')
-    limit = int(data.get('limit', 50))  # Max number of jobs to refresh
+    limit = int(data.get('limit', 1000))  # Max number of jobs to refresh (default: all)
     job_id = data.get('job_id')  # Refresh a specific job by ID
 
     app_logger.info(f"Description refresh requested (source: {source}, limit: {limit}, job_id: {job_id})")
@@ -619,12 +620,34 @@ def api_llm_process():
     for job in jobs_to_process:
         if 'llm_result' in job:
             result = job['llm_result']
+            
+            # Update LLM data
             db.update_job_llm_data(
                 job['id'],
                 result['cleaned_description'],
                 result['tags'],
                 result['entities']
             )
+            
+            # Also update missing job fields from extracted entities
+            try:
+                entities = json.loads(result['entities']) if isinstance(result['entities'], str) else result['entities']
+                updates = {}
+                
+                # Fill in location if missing/unknown
+                if (not job.get('location') or job.get('location', '').lower() in ['unknown', 'not specified', '']) and entities.get('locations'):
+                    updates['location'] = entities['locations'][0]
+                
+                # Fill in salary if missing/unknown
+                if (not job.get('salary') or job.get('salary', '').lower() in ['unknown', 'not specified', '']) and entities.get('salary_info'):
+                    updates['salary'] = entities['salary_info']
+                
+                # Apply updates if any
+                if updates:
+                    db.update_job(job['id'], updates)
+                    app_logger.info(f"[LLM] Updated job {job['id']} fields: {list(updates.keys())}")
+            except Exception as e:
+                app_logger.warning(f"[LLM] Failed to update job fields from entities: {e}")
 
     app_logger.info(f"LLM processing complete: {stats['processed']} processed, {stats['failed']} failed")
 

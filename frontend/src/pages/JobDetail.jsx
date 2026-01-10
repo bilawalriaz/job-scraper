@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { getJob, updateJob, deleteJob, processWithLLM } from '../api/client';
 import { Card, CardHeader, CardBody } from '../components/Card';
 import Button from '../components/Button';
@@ -108,6 +110,35 @@ function JobDetail() {
     const parsedTags = job?.tags ? JSON.parse(job.tags) : [];
     const parsedEntities = job?.entities ? JSON.parse(job.entities) : {};
 
+    // Helper to get best available value (prefer job field, fallback to extracted entity)
+    const isUnknown = (val) => !val || val.toLowerCase() === 'unknown' || val.toLowerCase() === 'not specified';
+
+    // Clean company name - sometimes scraper puts entire description in company field
+    const getCompany = () => {
+        // If company field is multi-line or very long, it's probably corrupted
+        if (job?.company && (job.company.includes('\n') || job.company.length > 100)) {
+            // Try to get from entities first
+            if (parsedEntities.companies?.length) return parsedEntities.companies[0];
+            // Otherwise take just the first line
+            return job.company.split('\n')[0].substring(0, 50);
+        }
+        if (parsedEntities.companies?.length && isUnknown(job?.company)) {
+            return parsedEntities.companies[0];
+        }
+        return job?.company || 'Unknown';
+    };
+
+    const getLocation = () => {
+        if (!isUnknown(job?.location)) return job.location;
+        if (parsedEntities.locations?.length) return parsedEntities.locations[0];
+        return 'Unknown';
+    };
+    const getSalary = () => {
+        if (!isUnknown(job?.salary)) return job.salary;
+        if (parsedEntities.salary_info) return parsedEntities.salary_info;
+        return null;
+    };
+
     if (loading) {
         return (
             <div className="loading-state">
@@ -211,9 +242,9 @@ function JobDetail() {
                                             </h1>
                                             <div className="d-flex align-center gap-4 text-secondary" style={{ fontSize: '0.9375rem' }}>
                                                 <BriefcaseIcon size={16} />
-                                                <span>{job.company}</span>
+                                                <span>{getCompany()}</span>
                                                 <LocationIcon size={16} />
-                                                <span>{job.location}</span>
+                                                <span>{getLocation()}</span>
                                             </div>
                                         </div>
                                         <StatusBadge status={job.status} style={{ fontSize: '0.875rem' }} />
@@ -223,7 +254,7 @@ function JobDetail() {
                                     <div className="detail-grid">
                                         <div className="detail-item">
                                             <small>Salary</small>
-                                            <p>{job.salary || <span className="text-muted">Not specified</span>}</p>
+                                            <p>{getSalary() || <span className="text-muted">Not specified</span>}</p>
                                         </div>
                                         <div className="detail-item">
                                             <small>Posted</small>
@@ -331,15 +362,21 @@ function JobDetail() {
                                                 </button>
                                             )}
                                         </div>
-                                        <div
-                                            className={`job-description ${descriptionExpanded ? 'expanded' : ''}`}
-                                            dangerouslySetInnerHTML={{
-                                                __html: (showOriginalDesc || !job.cleaned_description
-                                                    ? job.description
-                                                    : job.cleaned_description
-                                                )?.replace(/\n/g, '<br>') || 'No description available'
-                                            }}
-                                        />
+                                        <div className={`job-description ${descriptionExpanded ? 'expanded' : ''}`}>
+                                            {(showOriginalDesc || !job.cleaned_description) ? (
+                                                // Original description - render as HTML
+                                                <div
+                                                    dangerouslySetInnerHTML={{
+                                                        __html: job.description?.replace(/\n/g, '<br>') || 'No description available'
+                                                    }}
+                                                />
+                                            ) : (
+                                                // AI cleaned description - render as Markdown
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                    {job.cleaned_description || 'No description available'}
+                                                </ReactMarkdown>
+                                            )}
+                                        </div>
                                         <button
                                             className="show-more-btn"
                                             onClick={() => setDescriptionExpanded(!descriptionExpanded)}
