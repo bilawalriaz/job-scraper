@@ -651,52 +651,72 @@ def api_llm_process():
 
     app_logger.info(f"Processing {len(jobs_to_process)} jobs with LLM...")
 
-    def progress_callback(current, total, title):
-        app_logger.info(f"[LLM] Processing {current}/{total}: {title[:50]}...")
+    processed = 0
+    failed = 0
+    skipped = 0
 
-    stats = processor.process_jobs_batch(jobs_to_process, progress_callback)
+    # Process jobs one at a time and save immediately
+    for i, job in enumerate(jobs_to_process):
+        if i % 10 == 0:
+            app_logger.info(f"[LLM] Processing {i+1}/{len(jobs_to_process)}: {job.get('title', 'Unknown')[:50]}...")
 
-    # Update database with results
-    for job in jobs_to_process:
-        if 'llm_result' in job:
-            result = job['llm_result']
-            
-            # Update LLM data
-            db.update_job_llm_data(
-                job['id'],
-                result['cleaned_description'],
-                result['tags'],
-                result['entities']
-            )
-            
-            # Also update missing job fields from extracted entities
-            try:
-                entities = json.loads(result['entities']) if isinstance(result['entities'], str) else result['entities']
-                updates = {}
-                
-                # Fill in location if missing/unknown
-                if (not job.get('location') or job.get('location', '').lower() in ['unknown', 'not specified', '']) and entities.get('locations'):
-                    updates['location'] = entities['locations'][0]
-                
-                # Fill in salary if missing/unknown
-                if (not job.get('salary') or job.get('salary', '').lower() in ['unknown', 'not specified', '']) and entities.get('salary_info'):
-                    updates['salary'] = entities['salary_info']
-                
-                # Apply updates if any
-                if updates:
-                    db.update_job(job['id'], updates)
-                    app_logger.info(f"[LLM] Updated job {job['id']} fields: {list(updates.keys())}")
-            except Exception as e:
-                app_logger.warning(f"[LLM] Failed to update job fields from entities: {e}")
+        # Skip if description too short
+        if len(job.get('description', '')) < 50:
+            skipped += 1
+            continue
 
-    app_logger.info(f"LLM processing complete: {stats['processed']} processed, {stats['failed']} failed")
+        try:
+            result = processor.process_job(job)
+
+            if result:
+                # Save to database immediately
+                success = db.update_job_llm_data(
+                    job['id'],
+                    result['cleaned_description'],
+                    result['tags'],
+                    result['entities']
+                )
+
+                if success:
+                    processed += 1
+
+                    # Also update missing job fields from extracted entities
+                    try:
+                        entities = json.loads(result['entities']) if isinstance(result['entities'], str) else result['entities']
+                        updates = {}
+
+                        # Fill in location if missing/unknown
+                        if (not job.get('location') or job.get('location', '').lower() in ['unknown', 'not specified', '']) and entities.get('locations'):
+                            updates['location'] = entities['locations'][0]
+
+                        # Fill in salary if missing/unknown
+                        if (not job.get('salary') or job.get('salary', '').lower() in ['unknown', 'not specified', '']) and entities.get('salary_info'):
+                            updates['salary'] = entities['salary_info']
+
+                        # Apply updates if any
+                        if updates:
+                            db.update_job(job['id'], updates)
+                            app_logger.info(f"[LLM] Updated job {job['id']} fields: {list(updates.keys())}")
+                    except Exception as e:
+                        app_logger.warning(f"[LLM] Failed to update job fields from entities: {e}")
+                else:
+                    failed += 1
+                    app_logger.error(f"[LLM] Failed to save result for: {job.get('title')}")
+            else:
+                failed += 1
+
+        except Exception as e:
+            failed += 1
+            app_logger.error(f"[LLM] Error processing {job.get('title')}: {e}")
+
+    app_logger.info(f"LLM processing complete: {processed} processed, {failed} failed, {skipped} skipped")
 
     return jsonify({
         'success': True,
-        'processed': stats['processed'],
-        'failed': stats['failed'],
-        'skipped': stats['skipped'],
-        'message': f"Processed {stats['processed']} jobs with LLM"
+        'processed': processed,
+        'failed': failed,
+        'skipped': skipped,
+        'message': f"Processed {processed} jobs with LLM"
     })
 
 
@@ -865,12 +885,16 @@ def create_llm_executor(db_path: str):
     """Create an LLM processing executor function for the scheduler."""
     def executor(progress_callback=None):
         """Execute LLM processing task."""
+        app_logger.info("[Scheduler] Starting LLM processing task")
         db = JobDatabase(db_path)
         jobs = db.get_jobs_needing_llm_processing(limit=1000)
 
         if not jobs:
+            app_logger.info("[Scheduler] No jobs need LLM processing")
             db.close()
             return "No jobs need LLM processing"
+
+        app_logger.info(f"[Scheduler] Found {len(jobs)} jobs needing LLM processing")
 
         try:
             processor = get_processor()
@@ -878,25 +902,43 @@ def create_llm_executor(db_path: str):
             db.close()
             return f"LLM not configured: {e}"
 
-        def llm_progress(current, total, title):
+        processed = 0
+        failed = 0
+
+        # Process jobs one at a time and save immediately
+        for i, job in enumerate(jobs):
             if progress_callback:
-                progress_callback(current, total, f"Processing: {title[:40]}...")
+                progress_callback(i + 1, len(jobs), f"Processing: {job.get('title', 'Unknown')[:40]}...")
 
-        stats = processor.process_jobs_batch(jobs, llm_progress)
+            try:
+                result = processor.process_job(job)
 
-        # Update database with results
-        for job in jobs:
-            if 'llm_result' in job:
-                result = job['llm_result']
-                db.update_job_llm_data(
-                    job['id'],
-                    result['cleaned_description'],
-                    result['tags'],
-                    result['entities']
-                )
+                if result:
+                    # Save to database immediately
+                    success = db.update_job_llm_data(
+                        job['id'],
+                        result['cleaned_description'],
+                        result['tags'],
+                        result['entities']
+                    )
+                    if success:
+                        processed += 1
+                        if processed % 10 == 0:
+                            app_logger.info(f"[Scheduler] LLM processed {processed} jobs so far...")
+                    else:
+                        failed += 1
+                        app_logger.error(f"[Scheduler] Failed to save LLM result for: {job.get('title')}")
+                else:
+                    failed += 1
+
+            except Exception as e:
+                failed += 1
+                app_logger.error(f"[Scheduler] LLM error for {job.get('title')}: {e}")
 
         db.close()
-        return f"Processed {stats['processed']}, failed {stats['failed']}"
+        result = f"Processed {processed}, failed {failed} of {len(jobs)}"
+        app_logger.info(f"[Scheduler] LLM task complete: {result}")
+        return result
 
     return executor
 
