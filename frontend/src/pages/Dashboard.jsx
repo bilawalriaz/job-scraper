@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { getStats, getJobs, getConfigs, runScraper, getRateLimitStatus, resetRateLimit, refreshDescriptions, getRefreshStatus, processWithLLM, getLLMStatus } from '../api/client';
+import { getStats, getJobs, getConfigs, getRateLimitStatus, resetRateLimit, getSchedulerStatus, updateSchedulerConfig, runSchedulerTask } from '../api/client';
 import { Card, CardHeader, CardBody } from '../components/Card';
 import Button from '../components/Button';
 import Console from '../components/Console';
@@ -13,33 +13,39 @@ function Dashboard() {
     const [recentJobs, setRecentJobs] = useState([]);
     const [configs, setConfigs] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [scraping, setScraping] = useState(false);
-    const [scrapeResult, setScrapeResult] = useState(null);
     const [rateLimitStatus, setRateLimitStatus] = useState(null);
     const [resettingRateLimit, setResettingRateLimit] = useState(false);
-    const [refreshStatus, setRefreshStatus] = useState(null);
-    const [refreshing, setRefreshing] = useState(false);
-    const [refreshResult, setRefreshResult] = useState(null);
-    const [llmStatus, setLLMStatus] = useState(null);
-    const [llmProcessing, setLLMProcessing] = useState(false);
-    const [llmResult, setLLMResult] = useState(null);
+
+    // Scheduler state
+    const [schedulerStatus, setSchedulerStatus] = useState(null);
+    const [showSchedulerSettings, setShowSchedulerSettings] = useState(false);
+    const [schedulerConfig, setSchedulerConfig] = useState({
+        enabled: false,
+        scrape_interval_minutes: 60,
+        description_interval_minutes: 15,
+        llm_interval_minutes: 10,
+        scrape_enabled: true,
+        description_enabled: true,
+        llm_enabled: true,
+    });
 
     const loadData = useCallback(async () => {
         try {
-            const [statsData, jobsData, configsData, rateLimitData, refreshData, llmData] = await Promise.all([
+            const [statsData, jobsData, configsData, rateLimitData, schedulerData] = await Promise.all([
                 getStats(),
                 getJobs({ per_page: 10 }),
                 getConfigs(),
                 getRateLimitStatus(),
-                getRefreshStatus(),
-                getLLMStatus().catch(() => null)
+                getSchedulerStatus().catch(() => null)
             ]);
             setStats(statsData);
             setRecentJobs(jobsData.jobs || []);
             setConfigs(configsData.configs || []);
             setRateLimitStatus(rateLimitData);
-            setRefreshStatus(refreshData);
-            setLLMStatus(llmData);
+            if (schedulerData) {
+                setSchedulerStatus(schedulerData);
+                setSchedulerConfig(schedulerData.config);
+            }
         } catch (error) {
             console.error('Failed to load dashboard data:', error);
         } finally {
@@ -47,35 +53,28 @@ function Dashboard() {
         }
     }, []);
 
+    // Check if any task is running
+    const isAnyTaskRunning = schedulerStatus?.tasks && Object.values(schedulerStatus.tasks).some(t => t.status === 'running');
+
     useEffect(() => {
         loadData();
-        // Refresh stats more frequently when processing is active
-        const pollInterval = (scraping || refreshing || llmProcessing) ? 1000 : 5000;
+        // Poll more frequently when tasks are running
+        const pollInterval = isAnyTaskRunning ? 1000 : 3000;
         const interval = setInterval(() => {
             Promise.all([
                 getStats().then(setStats),
                 getRateLimitStatus().then(setRateLimitStatus),
-                getRefreshStatus().then(setRefreshStatus),
-                getLLMStatus().then(setLLMStatus).catch(() => { })
+                getSchedulerStatus().then(data => {
+                    setSchedulerStatus(data);
+                    // Don't overwrite local config changes
+                    if (!showSchedulerSettings) {
+                        setSchedulerConfig(data.config);
+                    }
+                }).catch(() => { })
             ]).catch(console.error);
         }, pollInterval);
         return () => clearInterval(interval);
-    }, [loadData, scraping, refreshing, llmProcessing]);
-
-    const handleRunScraper = async () => {
-        setScraping(true);
-        setScrapeResult(null);
-        try {
-            const result = await runScraper();
-            setScrapeResult(result);
-            // Reload data after scraping
-            loadData();
-        } catch (error) {
-            setScrapeResult({ error: error.message });
-        } finally {
-            setScraping(false);
-        }
-    };
+    }, [loadData, isAnyTaskRunning, showSchedulerSettings]);
 
     const handleResetRateLimit = async () => {
         setResettingRateLimit(true);
@@ -89,46 +88,57 @@ function Dashboard() {
         }
     };
 
-    const handleRefreshDescriptions = async () => {
-        setRefreshing(true);
-        setRefreshResult(null);
+    const handleRunTask = async (taskName) => {
         try {
-            // Refresh all partial descriptions (up to 2000)
-            const result = await refreshDescriptions({ limit: 2000 });
-            setRefreshResult(result);
-            // Reload data after refresh
-            loadData();
+            await runSchedulerTask(taskName);
         } catch (error) {
-            setRefreshResult({ error: error.message });
-        } finally {
-            setRefreshing(false);
+            console.error(`Failed to run task ${taskName}:`, error);
         }
     };
 
-    const handleProcessLLM = async () => {
-        setLLMProcessing(true);
-        setLLMResult(null);
+    const handleToggleScheduler = async () => {
         try {
-            // Process all pending jobs (with 3 keys at 40 RPM = 120 RPM parallel)
-            const result = await processWithLLM({ limit: 'all' });
-            setLLMResult(result);
-            // Reload data after processing
-            loadData();
+            const newEnabled = !schedulerConfig.enabled;
+            await updateSchedulerConfig({ enabled: newEnabled });
+            setSchedulerConfig(prev => ({ ...prev, enabled: newEnabled }));
         } catch (error) {
-            setLLMResult({ error: error.message });
-        } finally {
-            setLLMProcessing(false);
+            console.error('Failed to toggle scheduler:', error);
+        }
+    };
+
+    const handleSaveSchedulerConfig = async () => {
+        try {
+            await updateSchedulerConfig(schedulerConfig);
+            setShowSchedulerSettings(false);
+        } catch (error) {
+            console.error('Failed to save scheduler config:', error);
         }
     };
 
     // Check if any source is rate limited
     const isAnyRateLimited = rateLimitStatus && Object.values(rateLimitStatus).some(s => s.limited);
 
-    // Count of jobs needing full descriptions
-    const partialCount = refreshStatus?.total || 0;
+    // Get task states and counts
+    const tasks = schedulerStatus?.tasks || {};
+    const counts = schedulerStatus?.counts || {};
 
-    // Count of jobs needing LLM processing
-    const llmPendingCount = llmStatus?.pending || 0;
+    const scrapeRunning = tasks.scrape?.status === 'running';
+    const descriptionsRunning = tasks.descriptions?.status === 'running';
+    const llmRunning = tasks.llm?.status === 'running';
+
+    const partialCount = counts.partial_descriptions || 0;
+    const llmPendingCount = counts.llm_pending || 0;
+
+    // Helper to get task button text
+    const getTaskButtonText = (taskName, defaultText, runningText, count) => {
+        const task = tasks[taskName];
+        if (task?.status === 'running') {
+            const progress = task.progress || 0;
+            const total = task.total || count;
+            return total > 0 ? `${runningText} ${progress}/${total}` : runningText;
+        }
+        return count > 0 ? `${defaultText} ${count}` : defaultText;
+    };
 
     if (loading) {
         return (
@@ -147,67 +157,55 @@ function Dashboard() {
                     <p className="page-subtitle">Monitor your job search activity</p>
                 </div>
                 <div className="page-header-actions">
-                    {(llmPendingCount > 0 || llmProcessing) && (
+                    {(llmPendingCount > 0 || llmRunning) && (
                         <Button
                             variant="secondary"
-                            onClick={handleProcessLLM}
-                            loading={llmProcessing}
-                            disabled={llmProcessing}
+                            onClick={() => handleRunTask('llm')}
+                            loading={llmRunning}
+                            disabled={llmRunning}
                             style={{ marginRight: '8px' }}
                         >
                             <SearchIcon />
-                            {llmProcessing ? `Processing... ${llmPendingCount} left` : `Process ${llmPendingCount} with AI`}
+                            {getTaskButtonText('llm', 'Process with AI', 'Processing...', llmPendingCount)}
                         </Button>
                     )}
-                    {(partialCount > 0 || refreshing) && (
+                    {(partialCount > 0 || descriptionsRunning) && (
                         <Button
                             variant="secondary"
-                            onClick={handleRefreshDescriptions}
-                            loading={refreshing}
-                            disabled={refreshing}
+                            onClick={() => handleRunTask('descriptions')}
+                            loading={descriptionsRunning}
+                            disabled={descriptionsRunning}
                             style={{ marginRight: '8px' }}
                         >
                             <DownloadIcon />
-                            {refreshing ? `Refreshing... ${partialCount} left` : `Refresh ${partialCount} Partial`}
+                            {getTaskButtonText('descriptions', 'Refresh Partial', 'Refreshing...', partialCount)}
                         </Button>
                     )}
-                    <Button variant="primary" onClick={handleRunScraper} loading={scraping} disabled={scraping}>
+                    <Button
+                        variant="primary"
+                        onClick={() => handleRunTask('scrape')}
+                        loading={scrapeRunning}
+                        disabled={scrapeRunning}
+                    >
                         <PlayIcon />
-                        Run Scraper
+                        {scrapeRunning ? 'Scraping...' : 'Run Scraper'}
                     </Button>
                 </div>
             </div>
 
-            {/* Scrape Result */}
-            {scrapeResult && (
-                <div className={`alert ${scrapeResult.error ? 'alert-error' : 'alert-success'}`}>
-                    {scrapeResult.error ? (
-                        `Error: ${scrapeResult.error}`
-                    ) : (
-                        `Scraping complete! Found ${scrapeResult.total_found || 0} jobs, added ${scrapeResult.total_added || 0} new jobs.`
-                    )}
-                </div>
-            )}
-
-            {/* Refresh Result */}
-            {refreshResult && (
-                <div className={`alert ${refreshResult.error ? 'alert-error' : 'alert-success'}`}>
-                    {refreshResult.error ? (
-                        `Error: ${refreshResult.error}`
-                    ) : (
-                        `Refresh complete! Updated ${refreshResult.updated || 0} job descriptions${refreshResult.failed > 0 ? ` (${refreshResult.failed} failed)` : ''}.`
-                    )}
-                </div>
-            )}
-
-            {/* LLM Result */}
-            {llmResult && (
-                <div className={`alert ${llmResult.error ? 'alert-error' : 'alert-success'}`}>
-                    {llmResult.error ? (
-                        `Error: ${llmResult.error}`
-                    ) : (
-                        `AI processing complete! Processed ${llmResult.processed || 0} jobs${llmResult.failed > 0 ? ` (${llmResult.failed} failed)` : ''}.`
-                    )}
+            {/* Task Progress */}
+            {isAnyTaskRunning && (
+                <div className="alert alert-info">
+                    {Object.entries(tasks).filter(([, t]) => t.status === 'running').map(([name, task]) => (
+                        <div key={name} style={{ marginBottom: '4px' }}>
+                            <strong>{name}:</strong> {task.message || 'Running...'}
+                            {task.total > 0 && (
+                                <span style={{ marginLeft: '8px' }}>
+                                    ({task.progress}/{task.total})
+                                </span>
+                            )}
+                        </div>
+                    ))}
                 </div>
             )}
 
@@ -316,6 +314,92 @@ function Dashboard() {
 
                 {/* Sidebar */}
                 <div className="sidebar">
+                    {/* Scheduler Settings */}
+                    <Card>
+                        <CardHeader actions={
+                            <button
+                                onClick={handleToggleScheduler}
+                                className={`toggle-switch ${schedulerConfig.enabled ? 'active' : ''}`}
+                                title={schedulerConfig.enabled ? 'Disable auto-scheduling' : 'Enable auto-scheduling'}
+                            >
+                                <span className="toggle-slider" />
+                            </button>
+                        }>
+                            Auto Scheduler
+                        </CardHeader>
+                        <CardBody>
+                            {schedulerConfig.enabled ? (
+                                <p className="text-muted small" style={{ marginBottom: '12px' }}>
+                                    Pipeline runs automatically: Scrape every {schedulerConfig.scrape_interval_minutes}m,
+                                    descriptions every {schedulerConfig.description_interval_minutes}m,
+                                    AI every {schedulerConfig.llm_interval_minutes}m
+                                </p>
+                            ) : (
+                                <p className="text-muted small" style={{ marginBottom: '12px' }}>
+                                    Auto-scheduling is disabled. Use buttons above to run tasks manually.
+                                </p>
+                            )}
+
+                            {showSchedulerSettings ? (
+                                <div className="scheduler-settings">
+                                    <div className="form-group" style={{ marginBottom: '12px' }}>
+                                        <label style={{ fontSize: '0.8125rem', fontWeight: 500, display: 'block', marginBottom: '4px' }}>
+                                            Scrape Interval (minutes)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="5"
+                                            value={schedulerConfig.scrape_interval_minutes}
+                                            onChange={e => setSchedulerConfig(prev => ({ ...prev, scrape_interval_minutes: parseInt(e.target.value) || 60 }))}
+                                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)' }}
+                                        />
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: '12px' }}>
+                                        <label style={{ fontSize: '0.8125rem', fontWeight: 500, display: 'block', marginBottom: '4px' }}>
+                                            Description Fetch Interval (minutes)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="5"
+                                            value={schedulerConfig.description_interval_minutes}
+                                            onChange={e => setSchedulerConfig(prev => ({ ...prev, description_interval_minutes: parseInt(e.target.value) || 15 }))}
+                                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)' }}
+                                        />
+                                    </div>
+                                    <div className="form-group" style={{ marginBottom: '12px' }}>
+                                        <label style={{ fontSize: '0.8125rem', fontWeight: 500, display: 'block', marginBottom: '4px' }}>
+                                            AI Processing Interval (minutes)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="5"
+                                            value={schedulerConfig.llm_interval_minutes}
+                                            onChange={e => setSchedulerConfig(prev => ({ ...prev, llm_interval_minutes: parseInt(e.target.value) || 10 }))}
+                                            style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)' }}
+                                        />
+                                    </div>
+                                    <div className="d-flex gap-2" style={{ marginTop: '16px' }}>
+                                        <Button variant="primary" size="sm" onClick={handleSaveSchedulerConfig} style={{ flex: 1 }}>
+                                            Save
+                                        </Button>
+                                        <Button variant="secondary" size="sm" onClick={() => setShowSchedulerSettings(false)} style={{ flex: 1 }}>
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => setShowSchedulerSettings(true)}
+                                    style={{ width: '100%' }}
+                                >
+                                    Configure Intervals
+                                </Button>
+                            )}
+                        </CardBody>
+                    </Card>
+
                     {/* Active Searches */}
                     <Card>
                         <CardHeader>Active Searches</CardHeader>
@@ -352,16 +436,45 @@ function Dashboard() {
                             </Button>
                         </div>
                     </Card>
-
-                    {/* Recent Activity */}
-                    <Card>
-                        <CardHeader>Recent Activity</CardHeader>
-                        <CardBody>
-                            <p className="text-muted small">Activity tracking coming soon...</p>
-                        </CardBody>
-                    </Card>
                 </div>
             </div>
+
+            <style>{`
+                .toggle-switch {
+                    position: relative;
+                    width: 44px;
+                    height: 24px;
+                    background: var(--bg-tertiary);
+                    border: none;
+                    border-radius: 12px;
+                    cursor: pointer;
+                    transition: background 0.2s;
+                }
+                .toggle-switch.active {
+                    background: #10b981;
+                }
+                .toggle-slider {
+                    position: absolute;
+                    top: 2px;
+                    left: 2px;
+                    width: 20px;
+                    height: 20px;
+                    background: white;
+                    border-radius: 50%;
+                    transition: transform 0.2s;
+                }
+                .toggle-switch.active .toggle-slider {
+                    transform: translateX(20px);
+                }
+                .alert-info {
+                    background: rgba(59, 130, 246, 0.1);
+                    border: 1px solid rgba(59, 130, 246, 0.3);
+                    color: #3b82f6;
+                    padding: 12px 16px;
+                    border-radius: 8px;
+                    margin-bottom: 16px;
+                }
+            `}</style>
         </>
     );
 }

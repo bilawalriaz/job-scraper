@@ -20,6 +20,7 @@ from scrapers.reed import ReedScraper
 from scrapers.cvlibrary import CVLibraryScraper
 from scrapers.indeed import IndeedScraper
 from llm.processor import get_processor
+from scheduler import get_scheduler, SchedulerConfig
 
 # Available scrapers configuration
 AVAILABLE_SCRAPERS = {
@@ -721,7 +722,236 @@ def api_llm_status():
     })
 
 
+# =============================================================================
+# SCHEDULER API ENDPOINTS
+# =============================================================================
+
+def create_scrape_executor(db_path: str):
+    """Create a scrape executor function for the scheduler."""
+    def executor(progress_callback=None):
+        """Execute scraping task."""
+        import asyncio
+
+        async def run_scrape():
+            db = JobDatabase(db_path)
+            configs = db.get_search_configs(enabled_only=True)
+            if not configs:
+                return "No enabled configs"
+
+            total_found = 0
+            for i, config in enumerate(configs):
+                if progress_callback:
+                    progress_callback(i, len(configs), f"Scraping: {config.name}")
+
+                for source_name, scraper_class in AVAILABLE_SCRAPERS.items():
+                    scraper = None
+                    try:
+                        scraper = scraper_class(db, headless=True)
+                        await scraper.init_browser()
+                        jobs = await scraper.search_jobs(
+                            config.keywords,
+                            config.location,
+                            radius=config.radius,
+                            employment_types=config.employment_types or None,
+                            max_pages=5,
+                            save_incrementally=True
+                        )
+                        total_found += len(jobs)
+                    except Exception as e:
+                        app_logger.error(f"[Scheduler] Scrape error {source_name}: {e}")
+                    finally:
+                        if scraper:
+                            await scraper.cleanup()
+
+            db.close()
+            return f"Found {total_found} jobs"
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(run_scrape())
+        finally:
+            loop.close()
+
+    return executor
+
+
+def create_descriptions_executor(db_path: str):
+    """Create a descriptions executor function for the scheduler."""
+    def executor(progress_callback=None):
+        """Execute description fetching task."""
+        import asyncio
+        from scrapers.description_fetcher import DescriptionFetcher
+
+        db = JobDatabase(db_path)
+        jobs = db.get_jobs_needing_descriptions(limit=500)
+
+        if not jobs:
+            db.close()
+            return "No jobs need descriptions"
+
+        fetcher = DescriptionFetcher(max_retries=3, timeout=30)
+        updated = 0
+
+        for i, job in enumerate(jobs):
+            if progress_callback:
+                progress_callback(i + 1, len(jobs), f"Fetching: {job.title[:40]}...")
+
+            try:
+                description = fetcher.fetch_description(job.url, source=job.source)
+                if description and len(description) > 500:
+                    # Find job ID
+                    cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
+                    row = cursor.fetchone()
+                    if row:
+                        db.update_job_description(row['id'], description, mark_full=True)
+                        updated += 1
+            except Exception as e:
+                app_logger.error(f"[Scheduler] Description error: {e}")
+
+        db.close()
+        return f"Updated {updated}/{len(jobs)} descriptions"
+
+    return executor
+
+
+def create_llm_executor(db_path: str):
+    """Create an LLM processing executor function for the scheduler."""
+    def executor(progress_callback=None):
+        """Execute LLM processing task."""
+        db = JobDatabase(db_path)
+        jobs = db.get_jobs_needing_llm_processing(limit=1000)
+
+        if not jobs:
+            db.close()
+            return "No jobs need LLM processing"
+
+        try:
+            processor = get_processor()
+        except ValueError as e:
+            db.close()
+            return f"LLM not configured: {e}"
+
+        def llm_progress(current, total, title):
+            if progress_callback:
+                progress_callback(current, total, f"Processing: {title[:40]}...")
+
+        stats = processor.process_jobs_batch(jobs, llm_progress)
+
+        # Update database with results
+        for job in jobs:
+            if 'llm_result' in job:
+                result = job['llm_result']
+                db.update_job_llm_data(
+                    job['id'],
+                    result['cleaned_description'],
+                    result['tags'],
+                    result['entities']
+                )
+
+        db.close()
+        return f"Processed {stats['processed']}, failed {stats['failed']}"
+
+    return executor
+
+
+def init_scheduler():
+    """Initialize the scheduler with task executors."""
+    scheduler = get_scheduler(app.config['DB_PATH'])
+    scheduler.set_executor('scrape', create_scrape_executor(app.config['DB_PATH']))
+    scheduler.set_executor('descriptions', create_descriptions_executor(app.config['DB_PATH']))
+    scheduler.set_executor('llm', create_llm_executor(app.config['DB_PATH']))
+    scheduler.start()
+    return scheduler
+
+
+# Initialize scheduler on app startup
+_scheduler = None
+
+
+def get_app_scheduler():
+    """Get or initialize the app scheduler."""
+    global _scheduler
+    if _scheduler is None:
+        _scheduler = init_scheduler()
+    return _scheduler
+
+
+@app.route('/api/scheduler/status', methods=['GET'])
+def api_scheduler_status():
+    """Get scheduler status and task states."""
+    scheduler = get_app_scheduler()
+    db = get_db()
+
+    # Get counts for context
+    partial_count = db.get_partial_description_count().get('total', 0)
+    llm_count = db.get_llm_processing_count()
+
+    return jsonify({
+        'enabled': scheduler.config.enabled,
+        'config': scheduler.config.to_dict(),
+        'tasks': scheduler.get_all_states(),
+        'counts': {
+            'partial_descriptions': partial_count,
+            'llm_pending': llm_count['pending'],
+            'llm_processed': llm_count['processed'],
+        }
+    })
+
+
+@app.route('/api/scheduler/config', methods=['POST'])
+def api_scheduler_config():
+    """Update scheduler configuration."""
+    scheduler = get_app_scheduler()
+    data = request.get_json() or {}
+
+    # Update config
+    if 'enabled' in data:
+        scheduler.config.enabled = bool(data['enabled'])
+    if 'scrape_interval_minutes' in data:
+        scheduler.config.scrape_interval_minutes = int(data['scrape_interval_minutes'])
+    if 'description_interval_minutes' in data:
+        scheduler.config.description_interval_minutes = int(data['description_interval_minutes'])
+    if 'llm_interval_minutes' in data:
+        scheduler.config.llm_interval_minutes = int(data['llm_interval_minutes'])
+    if 'scrape_enabled' in data:
+        scheduler.config.scrape_enabled = bool(data['scrape_enabled'])
+    if 'description_enabled' in data:
+        scheduler.config.description_enabled = bool(data['description_enabled'])
+    if 'llm_enabled' in data:
+        scheduler.config.llm_enabled = bool(data['llm_enabled'])
+
+    scheduler.save_config()
+    app_logger.info(f"[Scheduler] Config updated: {scheduler.config.to_dict()}")
+
+    return jsonify({
+        'success': True,
+        'config': scheduler.config.to_dict()
+    })
+
+
+@app.route('/api/scheduler/run/<task_name>', methods=['POST'])
+def api_scheduler_run_task(task_name):
+    """Manually trigger a task to run now."""
+    scheduler = get_app_scheduler()
+
+    if task_name not in ['scrape', 'descriptions', 'llm']:
+        return jsonify({'error': f'Unknown task: {task_name}'}), 400
+
+    if scheduler.is_task_running(task_name):
+        return jsonify({'error': f'Task {task_name} is already running'}), 409
+
+    success = scheduler.run_task_now(task_name)
+    if success:
+        app_logger.info(f"[Scheduler] Manually triggered task: {task_name}")
+        return jsonify({'success': True, 'message': f'Started task: {task_name}'})
+    else:
+        return jsonify({'error': f'Failed to start task: {task_name}'}), 500
+
+
+# =============================================================================
 # React Frontend Serving
+# =============================================================================
 # These routes serve the built React app for all non-API routes
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

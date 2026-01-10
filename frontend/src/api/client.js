@@ -169,3 +169,33 @@ export async function processWithLLM(options = {}) {
 export async function getLLMStatus() {
     return fetchAPI('/llm/status');
 }
+
+// =============================================================================
+// SCHEDULER API
+// =============================================================================
+
+/**
+ * Get scheduler status and task states
+ */
+export async function getSchedulerStatus() {
+    return fetchAPI('/scheduler/status');
+}
+
+/**
+ * Update scheduler configuration
+ */
+export async function updateSchedulerConfig(config) {
+    return fetchAPI('/scheduler/config', {
+        method: 'POST',
+        body: JSON.stringify(config),
+    });
+}
+
+/**
+ * Manually run a scheduler task
+ */
+export async function runSchedulerTask(taskName) {
+    return fetchAPI(`/scheduler/run/${taskName}`, {
+        method: 'POST',
+    });
+}
