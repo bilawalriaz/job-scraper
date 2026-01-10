@@ -16,8 +16,8 @@ load_dotenv()
 # Rate limiting: 40 RPM per key, 3 keys = 120 RPM total
 RATE_LIMIT_PER_KEY = 40
 RATE_WINDOW_SECONDS = 60
-# Number of parallel workers (matches number of API keys for optimal throughput)
-MAX_WORKERS = 3
+# Number of parallel workers (higher than API keys to account for response time)
+MAX_WORKERS = 10
 
 
 @dataclass
@@ -172,8 +172,9 @@ Respond ONLY with valid JSON, no markdown code blocks or other text."""
                 api_key, key_name = result
                 break
 
-            wait_time = min(self.key_rotator.get_wait_time(), 5)
-            print(f"[LLM] Rate limited, waiting {wait_time:.1f}s...")
+            wait_time = min(self.key_rotator.get_wait_time(), 0.5)  # Quick retry
+            if wait_time > 0.1:
+                print(f"[LLM] Rate limited, waiting {wait_time:.1f}s...")
             time.sleep(wait_time)
             total_waited += wait_time
         else:

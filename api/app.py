@@ -926,8 +926,9 @@ def create_llm_executor(db_path: str):
                 thread_db.close()
                 return ('error', job, str(e))
 
-        # Use 3 workers to match 3 API keys (120 RPM total)
-        with ThreadPoolExecutor(max_workers=3) as executor_pool:
+        # Use 10 workers to account for API response time (~3-5s each)
+        # Rate limiting is handled by KeyRotator, so extra workers just wait for keys
+        with ThreadPoolExecutor(max_workers=10) as executor_pool:
             futures = {executor_pool.submit(process_single_job, job): job for job in jobs}
 
             for future in as_completed(futures):
