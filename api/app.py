@@ -530,33 +530,49 @@ async def api_refresh_descriptions():
         # Fetch full descriptions
         updated_jobs = await scraper.fetch_full_descriptions(jobs_to_refresh)
 
+        expired_count = 0
         # Update descriptions in database
         for job in updated_jobs:
             # Find job ID by matching URL
             cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
             row = cursor.fetchone()
-            if row:
-                # Only mark as full if description is substantial (500+ chars) AND actually changed
-                orig_len = original_descs.get(job.url, 0)
-                if job.description and len(job.description) > 500 and len(job.description) > orig_len:
-                    success = db.update_job_description(row['id'], job.description, mark_full=True)
-                    if success:
-                        updated_count += 1
-                    else:
-                        failed_count += 1
-                else:
-                    failed_count += 1  # Description fetch didn't produce substantial content
-            else:
+            if not row:
                 failed_count += 1
                 app_logger.warning(f"Could not find job in database with URL: {job.url}")
+                continue
 
-        app_logger.info(f"Refresh complete: {updated_count} updated, {failed_count} failed")
+            job_id = row['id']
+
+            # Check if job was marked as expired
+            if hasattr(job, '_expired') and job._expired:
+                db.mark_job_expired(job_id)
+                expired_count += 1
+                app_logger.info(f"Marked job as expired: {job.title}")
+                continue
+
+            # Only mark as full if description is substantial (500+ chars) AND actually changed
+            orig_len = original_descs.get(job.url, 0)
+            if job.description and len(job.description) > 500 and len(job.description) > orig_len:
+                success = db.update_job_description(job_id, job.description, mark_full=True)
+                if success:
+                    updated_count += 1
+                    app_logger.info(f"Updated description for: {job.title[:40]} ({len(job.description)} chars)")
+                else:
+                    failed_count += 1
+                    app_logger.error(f"Failed to update DB for: {job.title}")
+            else:
+                failed_count += 1  # Description fetch didn't produce substantial content
+                desc_len = len(job.description) if job.description else 0
+                app_logger.warning(f"Description unchanged or too short ({desc_len} chars): {job.title}")
+
+        app_logger.info(f"Refresh complete: {updated_count} updated, {expired_count} expired, {failed_count} failed")
 
         return jsonify({
             'success': True,
             'updated': updated_count,
+            'expired': expired_count,
             'failed': failed_count,
-            'message': f'Refreshed {updated_count} job descriptions'
+            'message': f'Refreshed {updated_count} descriptions, {expired_count} expired'
         })
 
     except Exception as e:

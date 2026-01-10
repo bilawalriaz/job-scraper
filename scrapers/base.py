@@ -303,7 +303,11 @@ class BaseScraper(ABC):
                 # Use curl_cffi to fetch the description
                 description = fetcher.fetch_description(job.url, source=source)
 
-                if description:
+                # Handle expired jobs - don't update description
+                if description == DescriptionFetcher.EXPIRED:
+                    logger.info(f"[{source}] Job listing expired: {job.title}")
+                    job._expired = True  # Mark for caller to handle
+                elif description and len(description) > 100:
                     job.description = description
                     logger.info(f"[{source}] Updated description for {job.title} ({len(description)} chars)")
                 else:
