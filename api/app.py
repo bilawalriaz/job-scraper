@@ -780,18 +780,22 @@ def create_descriptions_executor(db_path: str):
     """Create a descriptions executor function for the scheduler."""
     def executor(progress_callback=None):
         """Execute description fetching task."""
-        import asyncio
         from scrapers.description_fetcher import DescriptionFetcher
 
+        app_logger.info("[Scheduler] Starting descriptions task")
         db = JobDatabase(db_path)
         jobs = db.get_jobs_needing_descriptions(limit=500)
 
         if not jobs:
+            app_logger.info("[Scheduler] No jobs need descriptions")
             db.close()
             return "No jobs need descriptions"
 
+        app_logger.info(f"[Scheduler] Found {len(jobs)} jobs needing descriptions")
         fetcher = DescriptionFetcher(max_retries=3, timeout=30)
         updated = 0
+        expired = 0
+        failed = 0
 
         for i, job in enumerate(jobs):
             if progress_callback:
@@ -799,18 +803,44 @@ def create_descriptions_executor(db_path: str):
 
             try:
                 description = fetcher.fetch_description(job.url, source=job.source)
-                if description and len(description) > 500:
-                    # Find job ID
-                    cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
-                    row = cursor.fetchone()
-                    if row:
-                        db.update_job_description(row['id'], description, mark_full=True)
+
+                # Find job ID
+                cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
+                row = cursor.fetchone()
+
+                if not row:
+                    app_logger.warning(f"[Scheduler] Job not found in DB: {job.url}")
+                    failed += 1
+                    continue
+
+                job_id = row['id']
+
+                if description == DescriptionFetcher.EXPIRED:
+                    # Job listing no longer exists - mark as expired
+                    db.mark_job_expired(job_id)
+                    expired += 1
+                    app_logger.info(f"[Scheduler] Marked job as expired: {job.title}")
+                elif description and len(description) > 500:
+                    success = db.update_job_description(job_id, description, mark_full=True)
+                    if success:
                         updated += 1
+                        app_logger.info(f"[Scheduler] Updated description for: {job.title[:40]} ({len(description)} chars)")
+                    else:
+                        failed += 1
+                        app_logger.error(f"[Scheduler] Failed to update DB for: {job.title}")
+                else:
+                    failed += 1
+                    desc_len = len(description) if description else 0
+                    app_logger.warning(f"[Scheduler] Description too short ({desc_len} chars): {job.title}")
+
             except Exception as e:
-                app_logger.error(f"[Scheduler] Description error: {e}")
+                failed += 1
+                app_logger.error(f"[Scheduler] Description error for {job.title}: {e}")
 
         db.close()
-        return f"Updated {updated}/{len(jobs)} descriptions"
+        result = f"Updated {updated}, expired {expired}, failed {failed} of {len(jobs)}"
+        app_logger.info(f"[Scheduler] Descriptions task complete: {result}")
+        return result
 
     return executor
 

@@ -96,6 +96,9 @@ class DescriptionFetcher:
             return 'cvlibrary'
         return None
 
+    # Special return value to indicate job is expired/gone
+    EXPIRED = "__EXPIRED__"
+
     def fetch_description(self, url: str, source: str = None) -> Optional[str]:
         """
         Fetch full job description from a job URL.
@@ -105,7 +108,8 @@ class DescriptionFetcher:
             source: The job site source (auto-detected if not provided)
 
         Returns:
-            The job description text, or None if fetching failed
+            The job description text, or None if fetching failed,
+            or EXPIRED constant if job listing no longer exists
         """
         if not url:
             logger.warning("No URL provided")
@@ -115,6 +119,8 @@ class DescriptionFetcher:
         if not source:
             source = self._detect_source(url)
             logger.debug(f"Auto-detected source: {source}")
+
+        got_410 = False  # Track if we got "Gone" status
 
         for browser in self.BROWSER_TYPES:
             try:
@@ -129,6 +135,23 @@ class DescriptionFetcher:
                 )
 
                 if response.status_code == 200:
+                    # Check if page content indicates expired listing
+                    content_lower = response.text.lower()
+                    expired_indicators = [
+                        'no longer available',
+                        'has been removed',
+                        'expired',
+                        'position has been filled',
+                        'job is no longer',
+                        'this vacancy has',
+                        'sorry, this job',
+                    ]
+                    if any(indicator in content_lower for indicator in expired_indicators):
+                        # Check if it's actually an error page (short content or specific patterns)
+                        if len(response.text) < 5000 or 'here are some jobs' in content_lower:
+                            logger.info(f"Job listing expired (content indicates): {url}")
+                            return self.EXPIRED
+
                     # Parse HTML and extract description
                     description = self._extract_description(response.text, source)
                     if description:
@@ -136,12 +159,24 @@ class DescriptionFetcher:
                         return description
                     else:
                         logger.warning(f"Got 200 but couldn't extract description with {browser}")
+                elif response.status_code == 410:
+                    # 410 Gone - job listing has been removed
+                    logger.info(f"Job listing expired (410 Gone): {url}")
+                    got_410 = True
+                elif response.status_code == 404:
+                    # 404 Not Found - job listing doesn't exist
+                    logger.info(f"Job listing not found (404): {url}")
+                    return self.EXPIRED
                 else:
                     logger.warning(f"Got status {response.status_code} with {browser}")
 
             except Exception as e:
                 logger.warning(f"Error with {browser}: {e}")
                 continue
+
+        # If we got 410 from any browser, mark as expired
+        if got_410:
+            return self.EXPIRED
 
         logger.error(f"Failed to fetch description from {url} after trying all browsers")
         return None

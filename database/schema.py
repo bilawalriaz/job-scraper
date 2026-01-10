@@ -123,6 +123,7 @@ class JobDatabase:
             ("tags", "TEXT"),  # JSON array
             ("entities", "TEXT"),  # JSON object
             ("llm_processed", "BOOLEAN DEFAULT 0"),
+            ("is_expired", "BOOLEAN DEFAULT 0"),  # Job listing no longer exists
         ]
         for col_name, col_type in llm_columns:
             try:
@@ -549,12 +550,13 @@ class JobDatabase:
         return cursor.rowcount
 
     def get_jobs_needing_descriptions(self, limit: int = 100, source: str = None) -> List[JobListing]:
-        """Get jobs that don't have full descriptions yet."""
+        """Get jobs that don't have full descriptions yet (excluding expired)."""
         query = """
             SELECT id, title, company, location, description, salary, job_type,
                    posted_date, url, source, scraped_at, employment_type
             FROM jobs
             WHERE (has_full_description = 0 OR has_full_description IS NULL)
+            AND (is_expired = 0 OR is_expired IS NULL)
             AND url IS NOT NULL
             AND url != ''
         """
@@ -588,12 +590,25 @@ class JobDatabase:
 
         return jobs
 
+    def mark_job_expired(self, job_id: int) -> bool:
+        """Mark a job as expired (listing no longer available)."""
+        try:
+            self.conn.execute(
+                "UPDATE jobs SET is_expired = 1, status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (job_id,)
+            )
+            self.conn.commit()
+            return True
+        except sqlite3.Error:
+            return False
+
     def get_partial_description_count(self) -> Dict:
-        """Get count of jobs needing full descriptions by source."""
+        """Get count of jobs needing full descriptions by source (excluding expired)."""
         cursor = self.conn.execute("""
             SELECT source, COUNT(*) as count
             FROM jobs
             WHERE (has_full_description = 0 OR has_full_description IS NULL)
+            AND (is_expired = 0 OR is_expired IS NULL)
             AND url IS NOT NULL AND url != ''
             GROUP BY source
         """)
