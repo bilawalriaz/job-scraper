@@ -4,6 +4,7 @@ import os
 import json
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from collections import deque
@@ -15,6 +16,8 @@ load_dotenv()
 # Rate limiting: 40 RPM per key, 3 keys = 120 RPM total
 RATE_LIMIT_PER_KEY = 40
 RATE_WINDOW_SECONDS = 60
+# Number of parallel workers (matches number of API keys for optimal throughput)
+MAX_WORKERS = 3
 
 
 @dataclass
@@ -250,26 +253,45 @@ Description:
         return None
 
     def process_jobs_batch(self, jobs: List[Dict], progress_callback=None) -> Dict:
-        """Process a batch of jobs. Returns stats."""
+        """Process a batch of jobs in parallel. Returns stats."""
         stats = {'processed': 0, 'failed': 0, 'skipped': 0}
+        stats_lock = threading.Lock()
+        processed_count = [0]  # Use list for mutability in closure
 
-        for i, job in enumerate(jobs):
-            job_id = job.get('id')
+        def process_single_job(job: Dict) -> Tuple[Dict, Optional[Dict]]:
+            """Process a single job and return (job, result)."""
+            return job, self.process_job(job)
 
-            if progress_callback:
-                progress_callback(i + 1, len(jobs), job.get('title', 'Unknown'))
+        # Use ThreadPoolExecutor for parallel processing
+        # MAX_WORKERS matches API key count for optimal throughput
+        num_workers = min(MAX_WORKERS, len(jobs))
 
-            result = self.process_job(job)
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all jobs
+            future_to_job = {executor.submit(process_single_job, job): job for job in jobs}
 
-            if result:
-                stats['processed'] += 1
-                # Store result back in job dict for caller to handle DB update
-                job['llm_result'] = result
-            else:
-                if len(job.get('description', '')) < 50:
-                    stats['skipped'] += 1
-                else:
-                    stats['failed'] += 1
+            for future in as_completed(future_to_job):
+                job = future_to_job[future]
+                try:
+                    job, result = future.result()
+
+                    with stats_lock:
+                        processed_count[0] += 1
+                        if progress_callback:
+                            progress_callback(processed_count[0], len(jobs), job.get('title', 'Unknown'))
+
+                        if result:
+                            stats['processed'] += 1
+                            job['llm_result'] = result
+                        else:
+                            if len(job.get('description', '')) < 50:
+                                stats['skipped'] += 1
+                            else:
+                                stats['failed'] += 1
+                except Exception as e:
+                    with stats_lock:
+                        stats['failed'] += 1
+                        print(f"[LLM] Error processing job {job.get('id')}: {e}")
 
         return stats
 

@@ -49,7 +49,8 @@ function Dashboard() {
 
     useEffect(() => {
         loadData();
-        // Refresh stats and rate limits every 5 seconds for near real-time updates
+        // Refresh stats more frequently when processing is active
+        const pollInterval = (scraping || refreshing || llmProcessing) ? 1000 : 5000;
         const interval = setInterval(() => {
             Promise.all([
                 getStats().then(setStats),
@@ -57,9 +58,9 @@ function Dashboard() {
                 getRefreshStatus().then(setRefreshStatus),
                 getLLMStatus().then(setLLMStatus).catch(() => { })
             ]).catch(console.error);
-        }, 5000);
+        }, pollInterval);
         return () => clearInterval(interval);
-    }, [loadData]);
+    }, [loadData, scraping, refreshing, llmProcessing]);
 
     const handleRunScraper = async () => {
         setScraping(true);
@@ -92,7 +93,8 @@ function Dashboard() {
         setRefreshing(true);
         setRefreshResult(null);
         try {
-            const result = await refreshDescriptions();
+            // Refresh all partial descriptions (up to 2000)
+            const result = await refreshDescriptions({ limit: 2000 });
             setRefreshResult(result);
             // Reload data after refresh
             loadData();
@@ -107,7 +109,8 @@ function Dashboard() {
         setLLMProcessing(true);
         setLLMResult(null);
         try {
-            const result = await processWithLLM({ limit: 20 });
+            // Process all pending jobs (with 3 keys at 40 RPM = 120 RPM parallel)
+            const result = await processWithLLM({ limit: 'all' });
             setLLMResult(result);
             // Reload data after processing
             loadData();
@@ -144,7 +147,7 @@ function Dashboard() {
                     <p className="page-subtitle">Monitor your job search activity</p>
                 </div>
                 <div className="page-header-actions">
-                    {llmPendingCount > 0 && (
+                    {(llmPendingCount > 0 || llmProcessing) && (
                         <Button
                             variant="secondary"
                             onClick={handleProcessLLM}
@@ -153,10 +156,10 @@ function Dashboard() {
                             style={{ marginRight: '8px' }}
                         >
                             <SearchIcon />
-                            Process {llmPendingCount} with AI
+                            {llmProcessing ? `Processing... ${llmPendingCount} left` : `Process ${llmPendingCount} with AI`}
                         </Button>
                     )}
-                    {partialCount > 0 && (
+                    {(partialCount > 0 || refreshing) && (
                         <Button
                             variant="secondary"
                             onClick={handleRefreshDescriptions}
@@ -165,7 +168,7 @@ function Dashboard() {
                             style={{ marginRight: '8px' }}
                         >
                             <DownloadIcon />
-                            Refresh {partialCount} Partial
+                            {refreshing ? `Refreshing... ${partialCount} left` : `Refresh ${partialCount} Partial`}
                         </Button>
                     )}
                     <Button variant="primary" onClick={handleRunScraper} loading={scraping} disabled={scraping}>

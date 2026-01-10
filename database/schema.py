@@ -379,12 +379,14 @@ class JobDatabase:
     def update_job(self, job_id: int, updates: Dict) -> bool:
         """Update a job and mark as edited."""
         try:
+            # Build set clause and values from updates BEFORE modifying the dict
             set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
-            updates['is_edited'] = 1
-            updates['updated_at'] = datetime.utcnow().isoformat()
+            values = list(updates.values())
 
+            # Add is_edited and updated_at to the query
             query = f"UPDATE jobs SET {set_clause}, is_edited = 1, updated_at = ? WHERE id = ?"
-            values = list(updates.values()) + [job_id]
+            values.append(datetime.utcnow().isoformat())  # for updated_at
+            values.append(job_id)  # for WHERE id = ?
 
             self.conn.execute(query, values)
             self.conn.commit()
@@ -638,7 +640,7 @@ class JobDatabase:
         except sqlite3.Error:
             return False
 
-    def get_jobs_needing_llm_processing(self, limit: int = 100) -> List[Dict]:
+    def get_jobs_needing_llm_processing(self, limit: int = 1000) -> List[Dict]:
         """Get jobs that have full descriptions but haven't been LLM processed yet."""
         cursor = self.conn.execute("""
             SELECT id, title, company, location, description, salary, job_type,

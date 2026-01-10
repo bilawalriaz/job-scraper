@@ -221,15 +221,19 @@ async def scrape_source(source_name: str, configs: list, db_path: str) -> dict:
         # Second pass: Fetch full descriptions for all sources
         if hasattr(scraper, 'fetch_full_descriptions'):
             app_logger.info(f"[{source_name}] Fetching full descriptions...")
-            jobs_needing_descriptions = db.get_jobs_needing_descriptions(limit=50, source=source_name)
+            jobs_needing_descriptions = db.get_jobs_needing_descriptions(limit=500, source=source_name)
 
             if jobs_needing_descriptions:
+                # Store original descriptions to detect changes
+                original_descs = {job.url: len(job.description or '') for job in jobs_needing_descriptions}
                 updated_jobs = await scraper.fetch_full_descriptions(jobs_needing_descriptions)
                 updated_count = 0
                 for job in updated_jobs:
                     cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
                     row = cursor.fetchone()
-                    if row and job.description and len(job.description) > 200:
+                    # Only mark as full if description is substantial (500+ chars) AND actually changed
+                    orig_len = original_descs.get(job.url, 0)
+                    if row and job.description and len(job.description) > 500 and len(job.description) > orig_len:
                         db.update_job_description(row['id'], job.description, mark_full=True)
                         updated_count += 1
                 app_logger.info(f"[{source_name}] Updated {updated_count} descriptions")
@@ -519,6 +523,9 @@ async def api_refresh_descriptions():
                 'error': f'Scraper for {source_to_refresh} does not support description refresh'
             }), 400
 
+        # Store original descriptions to detect changes
+        original_descs = {job.url: len(job.description or '') for job in jobs_to_refresh}
+
         # Fetch full descriptions
         updated_jobs = await scraper.fetch_full_descriptions(jobs_to_refresh)
 
@@ -528,11 +535,16 @@ async def api_refresh_descriptions():
             cursor = db.conn.execute("SELECT id FROM jobs WHERE url = ?", (job.url,))
             row = cursor.fetchone()
             if row:
-                success = db.update_job_description(row['id'], job.description, mark_full=True)
-                if success:
-                    updated_count += 1
+                # Only mark as full if description is substantial (500+ chars) AND actually changed
+                orig_len = original_descs.get(job.url, 0)
+                if job.description and len(job.description) > 500 and len(job.description) > orig_len:
+                    success = db.update_job_description(row['id'], job.description, mark_full=True)
+                    if success:
+                        updated_count += 1
+                    else:
+                        failed_count += 1
                 else:
-                    failed_count += 1
+                    failed_count += 1  # Description fetch didn't produce substantial content
             else:
                 failed_count += 1
                 app_logger.warning(f"Could not find job in database with URL: {job.url}")
@@ -575,10 +587,21 @@ def api_llm_process():
     """
     API: Process job descriptions with LLM.
     Cleans descriptions, extracts tags and entities.
+
+    Parameters:
+        limit: Max jobs to process (default: 100, use 0 or 'all' for all pending)
+        job_id: Process a specific job by ID
     """
     db = get_db()
     data = request.get_json() or {}
-    limit = int(data.get('limit', 10))
+
+    # Handle 'all' or 0 as process all pending
+    limit_param = data.get('limit', 100)
+    if limit_param == 'all' or limit_param == 0:
+        limit = 10000  # Process up to 10k jobs (practical limit)
+    else:
+        limit = int(limit_param)
+
     job_id = data.get('job_id')  # Process specific job
 
     app_logger.info(f"LLM processing requested (limit: {limit}, job_id: {job_id})")
@@ -664,7 +687,7 @@ def api_llm_process():
 def api_llm_status():
     """
     API: Get LLM processing status.
-    Returns count of pending jobs and rate limit status.
+    Returns count of pending jobs, rate limit status, and estimated time.
     """
     db = get_db()
     processing_count = db.get_llm_processing_count()
@@ -672,14 +695,29 @@ def api_llm_status():
     try:
         processor = get_processor()
         rate_status = processor.get_rate_limit_status()
+        # Calculate total available RPM from all keys
+        total_rpm = sum(key_info.get('available', 0) for key_info in rate_status.values())
+        keys_count = len(rate_status)
     except ValueError:
         rate_status = {'error': 'LLM processor not initialized'}
+        total_rpm = 0
+        keys_count = 0
+
+    pending = processing_count['pending']
+    # Estimate time: with 3 keys at 40 RPM each = 120 RPM = 2 jobs/sec
+    # But parallel processing means we can do ~3 concurrent jobs
+    estimated_seconds = pending / 2 if pending > 0 else 0  # ~2 jobs/sec with 120 RPM
+    estimated_minutes = estimated_seconds / 60
 
     return jsonify({
-        'pending': processing_count['pending'],
+        'pending': pending,
         'processed': processing_count['processed'],
         'total': processing_count['total'],
-        'rate_limit': rate_status
+        'rate_limit': rate_status,
+        'keys_count': keys_count,
+        'total_rpm': total_rpm,
+        'estimated_time_seconds': round(estimated_seconds),
+        'estimated_time_minutes': round(estimated_minutes, 1)
     })
 
 
