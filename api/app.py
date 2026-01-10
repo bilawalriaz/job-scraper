@@ -879,14 +879,16 @@ def create_descriptions_executor(db_path: str):
 def create_llm_executor(db_path: str):
     """Create an LLM processing executor function for the scheduler."""
     def executor(progress_callback=None):
-        """Execute LLM processing task."""
-        app_logger.info("[Scheduler] Starting LLM processing task")
-        db = JobDatabase(db_path)
-        jobs = db.get_jobs_needing_llm_processing(limit=1000)
+        """Execute LLM processing task with parallel processing (3 workers for 3 API keys)."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import threading
+
+        app_logger.info("[Scheduler] Starting LLM processing task (parallel)")
+
+        jobs = JobDatabase(db_path).get_jobs_needing_llm_processing(limit=1000)
 
         if not jobs:
             app_logger.info("[Scheduler] No jobs need LLM processing")
-            db.close()
             return "No jobs need LLM processing"
 
         app_logger.info(f"[Scheduler] Found {len(jobs)} jobs needing LLM processing")
@@ -894,46 +896,61 @@ def create_llm_executor(db_path: str):
         try:
             processor = get_processor()
         except ValueError as e:
-            db.close()
             return f"LLM not configured: {e}"
 
-        processed = 0
-        failed = 0
+        processed = [0]  # Use list for thread-safe mutation
+        failed = [0]
+        completed = [0]
+        lock = threading.Lock()
 
-        # Process jobs one at a time and save immediately
-        for i, job in enumerate(jobs):
-            if progress_callback:
-                progress_callback(i + 1, len(jobs), f"Processing: {job.get('title', 'Unknown')[:40]}...")
-
+        def process_single_job(job):
+            """Process one job and save immediately."""
+            # Each thread gets its own DB connection
+            thread_db = JobDatabase(db_path)
             try:
                 result = processor.process_job(job)
 
                 if result:
-                    # Save to database immediately
-                    success = db.update_job_llm_data(
+                    success = thread_db.update_job_llm_data(
                         job['id'],
                         result['cleaned_description'],
                         result['tags'],
                         result['entities']
                     )
-                    if success:
-                        processed += 1
-                        if processed % 10 == 0:
-                            app_logger.info(f"[Scheduler] LLM processed {processed} jobs so far...")
-                    else:
-                        failed += 1
-                        app_logger.error(f"[Scheduler] Failed to save LLM result for: {job.get('title')}")
+                    thread_db.close()
+                    return ('success' if success else 'db_error', job)
                 else:
-                    failed += 1
-
+                    thread_db.close()
+                    return ('failed', job)
             except Exception as e:
-                failed += 1
-                app_logger.error(f"[Scheduler] LLM error for {job.get('title')}: {e}")
+                thread_db.close()
+                return ('error', job, str(e))
 
-        db.close()
-        result = f"Processed {processed}, failed {failed} of {len(jobs)}"
-        app_logger.info(f"[Scheduler] LLM task complete: {result}")
-        return result
+        # Use 3 workers to match 3 API keys (120 RPM total)
+        with ThreadPoolExecutor(max_workers=3) as executor_pool:
+            futures = {executor_pool.submit(process_single_job, job): job for job in jobs}
+
+            for future in as_completed(futures):
+                result = future.result()
+
+                with lock:
+                    completed[0] += 1
+                    if progress_callback:
+                        progress_callback(completed[0], len(jobs), f"Processed {completed[0]}/{len(jobs)}")
+
+                    if result[0] == 'success':
+                        processed[0] += 1
+                        if processed[0] % 20 == 0:
+                            app_logger.info(f"[Scheduler] LLM processed {processed[0]} jobs...")
+                    elif result[0] == 'error':
+                        failed[0] += 1
+                        app_logger.error(f"[Scheduler] LLM error for {result[1].get('title')}: {result[2]}")
+                    else:
+                        failed[0] += 1
+
+        result_msg = f"Processed {processed[0]}, failed {failed[0]} of {len(jobs)}"
+        app_logger.info(f"[Scheduler] LLM task complete: {result_msg}")
+        return result_msg
 
     return executor
 
