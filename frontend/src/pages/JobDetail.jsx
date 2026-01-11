@@ -1,13 +1,59 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { getJob, updateJob, deleteJob, processWithLLM } from '../api/client';
+import { getJob, updateJob, deleteJob, processWithLLM, getJobMatch, matchJobToCV, generateCV, generateCoverLetter, getDocuments, downloadDocument, getCV } from '../api/client';
 import { Card, CardHeader, CardBody } from '../components/Card';
 import Button from '../components/Button';
 import Spinner from '../components/Spinner';
 import { StatusBadge } from '../components/StatusBadge';
-import { ExternalLinkIcon, EditIcon, DeleteIcon, CheckIcon, BriefcaseIcon, LocationIcon, SearchIcon, RefreshIcon } from '../components/Icons';
+import { ExternalLinkIcon, EditIcon, DeleteIcon, CheckIcon, BriefcaseIcon, LocationIcon, SearchIcon, RefreshIcon, DownloadIcon, DocumentIcon, TargetIcon } from '../components/Icons';
+
+function MatchScoreBadge({ score, recommendation }) {
+    let bgColor, textColor;
+
+    if (score >= 80) {
+        bgColor = '#dcfce7';
+        textColor = '#166534';
+    } else if (score >= 60) {
+        bgColor = '#fef9c3';
+        textColor = '#854d0e';
+    } else if (score >= 40) {
+        bgColor = '#fed7aa';
+        textColor = '#9a3412';
+    } else {
+        bgColor = '#fee2e2';
+        textColor = '#991b1b';
+    }
+
+    return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '3rem',
+                height: '2rem',
+                borderRadius: 'var(--radius-md)',
+                background: bgColor,
+                color: textColor,
+                fontWeight: 700,
+                fontSize: '0.875rem'
+            }}>
+                {Math.round(score)}
+            </span>
+            {recommendation && (
+                <span style={{
+                    fontSize: '0.75rem',
+                    color: recommendation === 'Apply' ? '#166534' :
+                           recommendation === 'Consider' ? '#854d0e' : '#6b7280'
+                }}>
+                    {recommendation}
+                </span>
+            )}
+        </div>
+    );
+}
 
 function JobDetail() {
     const { id } = useParams();
@@ -21,9 +67,50 @@ function JobDetail() {
     const [llmProcessing, setLLMProcessing] = useState(false);
     const [showOriginalDesc, setShowOriginalDesc] = useState(false);
 
+    // CV Matching & Document Generation state
+    const [hasCV, setHasCV] = useState(false);
+    const [matchData, setMatchData] = useState(null);
+    const [jobDocuments, setJobDocuments] = useState([]);
+    const [analyzing, setAnalyzing] = useState(false);
+    const [generatingCV, setGeneratingCV] = useState(false);
+    const [generatingCover, setGeneratingCover] = useState(false);
+
+    const loadMatchData = useCallback(async () => {
+        try {
+            const data = await getJobMatch(id);
+            setMatchData(data.match || null);
+        } catch (error) {
+            // No match data yet - that's fine
+            setMatchData(null);
+        }
+    }, [id]);
+
+    const loadJobDocuments = useCallback(async () => {
+        try {
+            const data = await getDocuments();
+            // Filter to only this job's documents
+            const docs = (data.documents || []).filter(d => d.job_id === parseInt(id));
+            setJobDocuments(docs);
+        } catch (error) {
+            console.error('Failed to load documents:', error);
+        }
+    }, [id]);
+
+    const checkCV = useCallback(async () => {
+        try {
+            const data = await getCV();
+            setHasCV(!!data.cv);
+        } catch (error) {
+            setHasCV(false);
+        }
+    }, []);
+
     useEffect(() => {
         loadJob();
-    }, [id]);
+        loadMatchData();
+        loadJobDocuments();
+        checkCV();
+    }, [id, loadMatchData, loadJobDocuments, checkCV]);
 
     const loadJob = async () => {
         try {
@@ -104,6 +191,49 @@ function JobDetail() {
         } finally {
             setLLMProcessing(false);
         }
+    };
+
+    const handleAnalyzeMatch = async () => {
+        setAnalyzing(true);
+        try {
+            const data = await matchJobToCV(id);
+            setMatchData(data.match || null);
+        } catch (error) {
+            console.error('Failed to analyze match:', error);
+            alert('Failed to analyze match: ' + error.message);
+        } finally {
+            setAnalyzing(false);
+        }
+    };
+
+    const handleGenerateCV = async () => {
+        setGeneratingCV(true);
+        try {
+            await generateCV(id);
+            await loadJobDocuments();
+        } catch (error) {
+            console.error('Failed to generate CV:', error);
+            alert('Failed to generate CV: ' + error.message);
+        } finally {
+            setGeneratingCV(false);
+        }
+    };
+
+    const handleGenerateCoverLetter = async () => {
+        setGeneratingCover(true);
+        try {
+            await generateCoverLetter(id);
+            await loadJobDocuments();
+        } catch (error) {
+            console.error('Failed to generate cover letter:', error);
+            alert('Failed to generate cover letter: ' + error.message);
+        } finally {
+            setGeneratingCover(false);
+        }
+    };
+
+    const handleDownloadDocument = (docId) => {
+        downloadDocument(docId);
     };
 
     // Parse tags and entities from JSON strings
@@ -452,6 +582,128 @@ function JobDetail() {
                             >
                                 <DeleteIcon /> Delete
                             </Button>
+                        </div>
+                    </Card>
+
+                    {/* CV Matching & Documents Card */}
+                    <Card>
+                        <CardHeader>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <TargetIcon size={16} />
+                                CV Matching
+                            </div>
+                        </CardHeader>
+                        <div style={{ padding: '20px' }}>
+                            {!hasCV ? (
+                                <div style={{ textAlign: 'center', padding: '1rem 0' }}>
+                                    <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                                        Upload your CV to match against this job
+                                    </p>
+                                    <Link to="/cv">
+                                        <Button variant="secondary" size="sm">Upload CV</Button>
+                                    </Link>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Match Score */}
+                                    {matchData ? (
+                                        <div style={{ marginBottom: '16px' }}>
+                                            <label className="form-label">Match Score</label>
+                                            <MatchScoreBadge
+                                                score={matchData.match_score}
+                                                recommendation={matchData.recommendation}
+                                            />
+                                            {matchData.skills_matched?.length > 0 && (
+                                                <div style={{ marginTop: '8px' }}>
+                                                    <small style={{ color: 'var(--text-secondary)' }}>
+                                                        {matchData.skills_matched.length} skills matched
+                                                    </small>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div style={{ marginBottom: '16px' }}>
+                                            <Button
+                                                variant="secondary"
+                                                style={{ width: '100%' }}
+                                                onClick={handleAnalyzeMatch}
+                                                loading={analyzing}
+                                                disabled={analyzing}
+                                            >
+                                                <TargetIcon size={14} /> Analyze Match
+                                            </Button>
+                                        </div>
+                                    )}
+
+                                    {/* Generate Documents */}
+                                    <div style={{ marginBottom: '16px' }}>
+                                        <label className="form-label">Generate Documents</label>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            <Button
+                                                variant="primary"
+                                                size="sm"
+                                                style={{ width: '100%' }}
+                                                onClick={handleGenerateCV}
+                                                loading={generatingCV}
+                                                disabled={generatingCV || generatingCover}
+                                            >
+                                                <DocumentIcon size={14} /> Generate Tailored CV
+                                            </Button>
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                style={{ width: '100%' }}
+                                                onClick={handleGenerateCoverLetter}
+                                                loading={generatingCover}
+                                                disabled={generatingCV || generatingCover}
+                                            >
+                                                <DocumentIcon size={14} /> Generate Cover Letter
+                                            </Button>
+                                        </div>
+                                    </div>
+
+                                    {/* Generated Documents List */}
+                                    {jobDocuments.length > 0 && (
+                                        <div>
+                                            <label className="form-label">Generated Documents</label>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                {jobDocuments.map(doc => (
+                                                    <div
+                                                        key={doc.id}
+                                                        style={{
+                                                            display: 'flex',
+                                                            justifyContent: 'space-between',
+                                                            alignItems: 'center',
+                                                            padding: '8px 12px',
+                                                            background: 'var(--bg-secondary)',
+                                                            borderRadius: 'var(--radius-md)',
+                                                            fontSize: '0.875rem'
+                                                        }}
+                                                    >
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                            <DocumentIcon size={14} />
+                                                            <span style={{
+                                                                color: doc.doc_type === 'cv' ? '#1e40af' : '#7c3aed',
+                                                                fontWeight: 500
+                                                            }}>
+                                                                {doc.doc_type === 'cv' ? 'Tailored CV' : 'Cover Letter'}
+                                                            </span>
+                                                        </div>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => handleDownloadDocument(doc.id)}
+                                                            style={{ padding: '4px 8px' }}
+                                                        >
+                                                            <DownloadIcon size={14} />
+                                                        </Button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            )}
                         </div>
                     </Card>
 

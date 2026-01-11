@@ -79,6 +79,9 @@ function ConfigForm({ config, onSave, onCancel, saving }) {
                     <option value="">All Types</option>
                     <option value="contract">Contract</option>
                     <option value="permanent">Permanent</option>
+                    <option value="wfh">Remote / Work From Home</option>
+                    <option value="temporary">Temporary</option>
+                    <option value="part-time">Part-time</option>
                 </select>
             </div>
             <div className="form-group">
@@ -175,6 +178,29 @@ function Configs() {
                     <PlusIcon /> Add New Search
                 </Button>
             </div>
+
+            {/* Remote Jobs Help */}
+            <Card style={{ marginBottom: '1.5rem', background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)', border: '1px solid #f59e0b' }}>
+                <div style={{ padding: '1rem' }}>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#92400e', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span>🏠</span> Finding Remote / Work From Home Jobs
+                    </h3>
+                    <div style={{ fontSize: '0.85rem', color: '#78350f', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                        <div>
+                            <strong>TotalJobs:</strong> Select "Remote / Work From Home" type above
+                        </div>
+                        <div>
+                            <strong>Indeed:</strong> Add "remote" to keywords or use "Remote" as location
+                        </div>
+                        <div>
+                            <strong>Reed:</strong> Add "remote" to keywords or use "Remote" as location
+                        </div>
+                        <div>
+                            <strong>CV-Library:</strong> Use "Remote" as location
+                        </div>
+                    </div>
+                </div>
+            </Card>
 
             {/* Configs Table */}
             <Card>

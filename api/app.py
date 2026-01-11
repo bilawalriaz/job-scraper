@@ -1051,6 +1051,471 @@ def api_scheduler_run_task(task_name):
 
 
 # =============================================================================
+# CV Management Endpoints
+# =============================================================================
+
+@app.route('/api/cv/upload', methods=['POST'])
+def api_upload_cv():
+    """Upload a CV file (DOCX) and parse it."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'error': 'No file selected'}), 400
+
+    if not file.filename.lower().endswith('.docx'):
+        return jsonify({'error': 'Only DOCX files are supported'}), 400
+
+    try:
+        from cv.parser import CVParser
+        from cv.generator import ensure_dirs, CV_DIR
+        from llm.processor import get_processor
+        import json
+        from datetime import datetime
+
+        ensure_dirs()
+
+        # Save the file
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"cv_{timestamp}.docx"
+        file_path = CV_DIR / filename
+        file.save(str(file_path))
+
+        # Parse the CV
+        parser = CVParser(str(file_path))
+        raw_text = parser.extract_text()
+
+        # Parse with LLM
+        processor = get_processor()
+        parsed_data = processor.parse_cv(raw_text)
+
+        # Save to database
+        db = get_db()
+        cv_id = db.save_cv(
+            filename=filename,
+            file_path=str(file_path),
+            raw_text=raw_text,
+            parsed_data=json.dumps(parsed_data) if parsed_data else ''
+        )
+
+        return jsonify({
+            'success': True,
+            'cv_id': cv_id,
+            'filename': filename,
+            'parsed_data': parsed_data,
+            'text_length': len(raw_text)
+        })
+
+    except Exception as e:
+        app_logger.error(f"CV upload error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/cv', methods=['GET'])
+def api_get_cv():
+    """Get the currently active CV."""
+    db = get_db()
+    cv = db.get_active_cv()
+
+    if not cv:
+        return jsonify({'cv': None})
+
+    # Parse the parsed_data JSON
+    import json
+    if cv.get('parsed_data'):
+        try:
+            cv['parsed_data'] = json.loads(cv['parsed_data'])
+        except json.JSONDecodeError:
+            cv['parsed_data'] = None
+
+    return jsonify({'cv': cv})
+
+
+@app.route('/api/cv/<int:cv_id>', methods=['DELETE'])
+def api_delete_cv(cv_id):
+    """Delete a CV."""
+    db = get_db()
+
+    # Get CV to delete file
+    cv = db.get_cv(cv_id)
+    if cv and cv.get('file_path'):
+        try:
+            import os
+            if os.path.exists(cv['file_path']):
+                os.remove(cv['file_path'])
+        except Exception as e:
+            app_logger.warning(f"Could not delete CV file: {e}")
+
+    success = db.delete_cv(cv_id)
+    return jsonify({'success': success})
+
+
+# =============================================================================
+# Voice Profile Endpoints
+# =============================================================================
+
+@app.route('/api/voice-profile', methods=['GET'])
+def api_get_voice_profile():
+    """Get the active voice profile."""
+    db = get_db()
+    profile = db.get_active_voice_profile()
+    return jsonify({'profile': profile})
+
+
+@app.route('/api/voice-profile', methods=['POST'])
+def api_save_voice_profile():
+    """Save or update the voice profile."""
+    data = request.get_json() or {}
+    db = get_db()
+
+    profile_id = db.save_voice_profile(data)
+    return jsonify({
+        'success': True,
+        'profile_id': profile_id
+    })
+
+
+# =============================================================================
+# Job Matching Endpoints
+# =============================================================================
+
+@app.route('/api/match/job/<int:job_id>', methods=['POST'])
+def api_match_single_job(job_id):
+    """Match active CV against a specific job."""
+    import json
+
+    db = get_db()
+    cv = db.get_active_cv()
+    if not cv:
+        return jsonify({'error': 'No CV uploaded'}), 400
+
+    job = db.get_job(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    # Parse CV data
+    cv_data = {}
+    if cv.get('parsed_data'):
+        try:
+            cv_data = json.loads(cv['parsed_data']) if isinstance(cv['parsed_data'], str) else cv['parsed_data']
+        except json.JSONDecodeError:
+            pass
+
+    if not cv_data:
+        return jsonify({'error': 'CV not properly parsed'}), 400
+
+    # Run matching
+    from llm.processor import get_processor
+    processor = get_processor()
+    match_result = processor.match_cv_to_job(cv_data, job)
+
+    if not match_result:
+        return jsonify({'error': 'Failed to analyze match'}), 500
+
+    # Save match result
+    db.save_job_match(cv['id'], job_id, {
+        'match_score': match_result.get('match_score', 0),
+        'skills_matched': json.dumps(match_result.get('skills_matched', [])),
+        'skills_missing': json.dumps(match_result.get('skills_missing', [])),
+        'recommendation': match_result.get('recommendation', ''),
+        'analysis': match_result.get('summary', ''),
+        'tailoring_tips': json.dumps(match_result.get('tailoring_tips', []))
+    })
+
+    return jsonify({
+        'success': True,
+        'match': match_result
+    })
+
+
+@app.route('/api/match/analyze', methods=['POST'])
+def api_batch_match():
+    """Match CV against multiple jobs."""
+    import json
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    data = request.get_json() or {}
+    job_ids = data.get('job_ids', [])
+    limit = data.get('limit', 50)
+    filter_status = data.get('status')
+
+    db = get_db()
+    cv = db.get_active_cv()
+    if not cv:
+        return jsonify({'error': 'No CV uploaded'}), 400
+
+    cv_data = {}
+    if cv.get('parsed_data'):
+        try:
+            cv_data = json.loads(cv['parsed_data']) if isinstance(cv['parsed_data'], str) else cv['parsed_data']
+        except json.JSONDecodeError:
+            pass
+
+    if not cv_data:
+        return jsonify({'error': 'CV not properly parsed'}), 400
+
+    # Get jobs to match
+    if job_ids:
+        jobs = [db.get_job(jid) for jid in job_ids]
+        jobs = [j for j in jobs if j]
+    else:
+        # Get unmatched jobs
+        jobs = db.get_unmatched_jobs(cv['id'], limit=limit)
+
+    if not jobs:
+        return jsonify({'success': True, 'matched': 0, 'message': 'No jobs to match'})
+
+    from llm.processor import get_processor
+    processor = get_processor()
+
+    results = []
+    matched = 0
+
+    def process_job(job):
+        match_result = processor.match_cv_to_job(cv_data, job)
+        return job, match_result
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(process_job, job): job for job in jobs}
+        for future in as_completed(futures):
+            job, match_result = future.result()
+            if match_result:
+                db.save_job_match(cv['id'], job['id'], {
+                    'match_score': match_result.get('match_score', 0),
+                    'skills_matched': json.dumps(match_result.get('skills_matched', [])),
+                    'skills_missing': json.dumps(match_result.get('skills_missing', [])),
+                    'recommendation': match_result.get('recommendation', ''),
+                    'analysis': match_result.get('summary', ''),
+                    'tailoring_tips': json.dumps(match_result.get('tailoring_tips', []))
+                })
+                results.append({
+                    'job_id': job['id'],
+                    'title': job['title'],
+                    'company': job['company'],
+                    'match_score': match_result.get('match_score', 0),
+                    'recommendation': match_result.get('recommendation', '')
+                })
+                matched += 1
+
+    return jsonify({
+        'success': True,
+        'matched': matched,
+        'results': results
+    })
+
+
+@app.route('/api/match/results', methods=['GET'])
+def api_get_match_results():
+    """Get match results for the active CV."""
+    import json
+
+    db = get_db()
+    cv = db.get_active_cv()
+    if not cv:
+        return jsonify({'matches': [], 'stats': {}})
+
+    min_score = float(request.args.get('min_score', 0))
+    recommendation = request.args.get('recommendation')
+    limit = int(request.args.get('limit', 100))
+
+    matches = db.get_match_results(cv['id'], min_score, recommendation, limit)
+
+    # Parse JSON fields
+    for match in matches:
+        for field in ['skills_matched', 'skills_missing', 'tailoring_tips']:
+            if match.get(field):
+                try:
+                    match[field] = json.loads(match[field])
+                except json.JSONDecodeError:
+                    pass
+
+    stats = db.get_match_stats(cv['id'])
+
+    return jsonify({
+        'matches': matches,
+        'stats': stats
+    })
+
+
+@app.route('/api/match/job/<int:job_id>', methods=['GET'])
+def api_get_job_match(job_id):
+    """Get match result for a specific job."""
+    import json
+
+    db = get_db()
+    cv = db.get_active_cv()
+    if not cv:
+        return jsonify({'match': None})
+
+    match = db.get_job_match(cv['id'], job_id)
+    if match:
+        for field in ['skills_matched', 'skills_missing', 'tailoring_tips']:
+            if match.get(field):
+                try:
+                    match[field] = json.loads(match[field])
+                except json.JSONDecodeError:
+                    pass
+
+    return jsonify({'match': match})
+
+
+# =============================================================================
+# Document Generation Endpoints
+# =============================================================================
+
+@app.route('/api/generate/cv/<int:job_id>', methods=['POST'])
+def api_generate_cv(job_id):
+    """Generate a tailored CV for a specific job."""
+    import json
+
+    db = get_db()
+    cv = db.get_active_cv()
+    if not cv:
+        return jsonify({'error': 'No CV uploaded'}), 400
+
+    job = db.get_job(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    voice_profile = db.get_active_voice_profile() or {}
+
+    cv_data = {}
+    if cv.get('parsed_data'):
+        try:
+            cv_data = json.loads(cv['parsed_data']) if isinstance(cv['parsed_data'], str) else cv['parsed_data']
+        except json.JSONDecodeError:
+            pass
+
+    # Generate tailored content
+    from llm.processor import get_processor
+    from cv.generator import DocumentGenerator
+
+    processor = get_processor()
+    tailored_content = processor.tailor_cv(cv_data, job, voice_profile)
+
+    if not tailored_content:
+        return jsonify({'error': 'Failed to generate tailored CV'}), 500
+
+    # Generate document
+    generator = DocumentGenerator()
+    file_path = generator.create_tailored_cv_from_content(cv_data, tailored_content, job)
+
+    # Save record
+    filename = file_path.split('/')[-1]
+    doc_id = db.save_generated_document(job_id, cv['id'], 'cv', filename, file_path)
+
+    return jsonify({
+        'success': True,
+        'document_id': doc_id,
+        'filename': filename,
+        'changes': tailored_content.get('changes_made', [])
+    })
+
+
+@app.route('/api/generate/cover-letter/<int:job_id>', methods=['POST'])
+def api_generate_cover_letter(job_id):
+    """Generate a cover letter for a specific job."""
+    import json
+
+    db = get_db()
+    cv = db.get_active_cv()
+    if not cv:
+        return jsonify({'error': 'No CV uploaded'}), 400
+
+    job = db.get_job(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    voice_profile = db.get_active_voice_profile() or {}
+
+    cv_data = {}
+    if cv.get('parsed_data'):
+        try:
+            cv_data = json.loads(cv['parsed_data']) if isinstance(cv['parsed_data'], str) else cv['parsed_data']
+        except json.JSONDecodeError:
+            pass
+
+    # Generate cover letter content
+    from llm.processor import get_processor
+    from cv.generator import DocumentGenerator
+
+    processor = get_processor()
+    letter_result = processor.generate_cover_letter(cv_data, job, voice_profile)
+
+    if not letter_result or not letter_result.get('cover_letter'):
+        return jsonify({'error': 'Failed to generate cover letter'}), 500
+
+    # Generate document
+    generator = DocumentGenerator()
+    file_path = generator.create_cover_letter(letter_result['cover_letter'], job, voice_profile)
+
+    # Save record
+    filename = file_path.split('/')[-1]
+    doc_id = db.save_generated_document(job_id, cv['id'], 'cover_letter', filename, file_path)
+
+    return jsonify({
+        'success': True,
+        'document_id': doc_id,
+        'filename': filename,
+        'preview': letter_result['cover_letter'][:500] + '...',
+        'key_points': letter_result.get('key_points_highlighted', [])
+    })
+
+
+@app.route('/api/documents', methods=['GET'])
+def api_get_documents():
+    """Get all generated documents."""
+    job_id = request.args.get('job_id', type=int)
+    db = get_db()
+    documents = db.get_generated_documents(job_id)
+    return jsonify({'documents': documents})
+
+
+@app.route('/api/documents/<int:doc_id>/download', methods=['GET'])
+def api_download_document(doc_id):
+    """Download a generated document."""
+    db = get_db()
+    doc = db.get_document(doc_id)
+
+    if not doc:
+        return jsonify({'error': 'Document not found'}), 404
+
+    import os
+    if not os.path.exists(doc['file_path']):
+        return jsonify({'error': 'Document file not found'}), 404
+
+    directory = os.path.dirname(doc['file_path'])
+    filename = os.path.basename(doc['file_path'])
+
+    return send_from_directory(
+        directory,
+        filename,
+        as_attachment=True,
+        download_name=doc['filename']
+    )
+
+
+@app.route('/api/documents/<int:doc_id>', methods=['DELETE'])
+def api_delete_document(doc_id):
+    """Delete a generated document."""
+    db = get_db()
+
+    # Get document to delete file
+    doc = db.get_document(doc_id)
+    if doc and doc.get('file_path'):
+        try:
+            import os
+            if os.path.exists(doc['file_path']):
+                os.remove(doc['file_path'])
+        except Exception as e:
+            app_logger.warning(f"Could not delete document file: {e}")
+
+    success = db.delete_document(doc_id)
+    return jsonify({'success': success})
+
+
+# =============================================================================
 # React Frontend Serving
 # =============================================================================
 # These routes serve the built React app for all non-API routes

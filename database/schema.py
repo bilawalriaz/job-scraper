@@ -63,6 +63,91 @@ class SearchConfig:
         return d
 
 
+@dataclass
+class UserCV:
+    """User's uploaded CV."""
+    id: Optional[int] = None
+    filename: str = ""
+    file_path: str = ""
+    raw_text: str = ""
+    parsed_data: str = ""  # JSON: skills, experience, education
+    created_at: Optional[str] = None
+    is_active: bool = True
+
+    def to_dict(self) -> Dict:
+        d = asdict(self)
+        if self.id is None:
+            d.pop('id', None)
+        d.pop('created_at', None)
+        return d
+
+
+@dataclass
+class VoiceProfile:
+    """User's writing voice profile for cover letters."""
+    id: Optional[int] = None
+    # Guided prompt responses
+    achievement_example: str = ""  # How they describe achievements
+    problem_solved: str = ""  # How they explain problem-solving
+    why_interested: str = ""  # Why looking for new opportunities
+    strengths_description: str = ""  # How they describe their strengths
+    collaboration_style: str = ""  # How they describe teamwork
+    # Style preferences
+    tone: str = "professional"  # professional/friendly/confident
+    formality: str = "formal"  # formal/conversational
+    avoid_phrases: str = ""  # JSON array of phrases to avoid
+    created_at: Optional[str] = None
+    is_active: bool = True
+
+    def to_dict(self) -> Dict:
+        d = asdict(self)
+        if self.id is None:
+            d.pop('id', None)
+        d.pop('created_at', None)
+        return d
+
+
+@dataclass
+class JobMatch:
+    """CV-to-job matching result."""
+    id: Optional[int] = None
+    cv_id: int = 0
+    job_id: int = 0
+    match_score: float = 0.0  # 0-100
+    skills_matched: str = ""  # JSON array
+    skills_missing: str = ""  # JSON array
+    recommendation: str = ""  # Apply/Consider/Skip
+    analysis: str = ""  # Full LLM reasoning
+    tailoring_tips: str = ""  # JSON array
+    created_at: Optional[str] = None
+
+    def to_dict(self) -> Dict:
+        d = asdict(self)
+        if self.id is None:
+            d.pop('id', None)
+        d.pop('created_at', None)
+        return d
+
+
+@dataclass
+class GeneratedDocument:
+    """Generated tailored CV or cover letter."""
+    id: Optional[int] = None
+    job_id: int = 0
+    cv_id: int = 0
+    doc_type: str = ""  # 'cv' or 'cover_letter'
+    filename: str = ""
+    file_path: str = ""
+    created_at: Optional[str] = None
+
+    def to_dict(self) -> Dict:
+        d = asdict(self)
+        if self.id is None:
+            d.pop('id', None)
+        d.pop('created_at', None)
+        return d
+
+
 class JobDatabase:
     """SQLite database for storing and analyzing job listings."""
 
@@ -169,6 +254,75 @@ class JobDatabase:
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON jobs(status);")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_employment_type ON jobs(employment_type);")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_scraped_at ON jobs(scraped_at DESC);")
+
+        # User CV table
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_cv (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                raw_text TEXT,
+                parsed_data TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT 1
+            )
+        """)
+
+        # Voice profile table
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS voice_profile (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                achievement_example TEXT,
+                problem_solved TEXT,
+                why_interested TEXT,
+                strengths_description TEXT,
+                collaboration_style TEXT,
+                tone TEXT DEFAULT 'professional',
+                formality TEXT DEFAULT 'formal',
+                avoid_phrases TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT 1
+            )
+        """)
+
+        # Job match table
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS job_match (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cv_id INTEGER NOT NULL,
+                job_id INTEGER NOT NULL,
+                match_score REAL,
+                skills_matched TEXT,
+                skills_missing TEXT,
+                recommendation TEXT,
+                analysis TEXT,
+                tailoring_tips TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (cv_id) REFERENCES user_cv(id),
+                FOREIGN KEY (job_id) REFERENCES jobs(id),
+                UNIQUE(cv_id, job_id)
+            )
+        """)
+
+        # Generated documents table
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS generated_document (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                cv_id INTEGER NOT NULL,
+                doc_type TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (job_id) REFERENCES jobs(id),
+                FOREIGN KEY (cv_id) REFERENCES user_cv(id)
+            )
+        """)
+
+        # Indexes for new tables
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_job_match_job ON job_match(job_id);")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_job_match_score ON job_match(match_score DESC);")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_generated_doc_job ON generated_document(job_id);")
 
         self.conn.commit()
 
@@ -731,6 +885,238 @@ class JobDatabase:
             return True
         except sqlite3.Error as e:
             print(f"Error updating LLM data: {e}")
+            return False
+
+    # ==================== CV Methods ====================
+
+    def save_cv(self, filename: str, file_path: str, raw_text: str, parsed_data: str) -> int:
+        """Save a new CV and deactivate any existing active CV."""
+        # Deactivate existing CVs
+        self.conn.execute("UPDATE user_cv SET is_active = 0 WHERE is_active = 1")
+
+        cursor = self.conn.execute("""
+            INSERT INTO user_cv (filename, file_path, raw_text, parsed_data, is_active)
+            VALUES (?, ?, ?, ?, 1)
+        """, (filename, file_path, raw_text, parsed_data))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_active_cv(self) -> Optional[Dict]:
+        """Get the currently active CV."""
+        cursor = self.conn.execute("SELECT * FROM user_cv WHERE is_active = 1")
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_cv(self, cv_id: int) -> Optional[Dict]:
+        """Get a CV by ID."""
+        cursor = self.conn.execute("SELECT * FROM user_cv WHERE id = ?", (cv_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def delete_cv(self, cv_id: int) -> bool:
+        """Delete a CV and its associated matches and documents."""
+        try:
+            self.conn.execute("DELETE FROM job_match WHERE cv_id = ?", (cv_id,))
+            self.conn.execute("DELETE FROM generated_document WHERE cv_id = ?", (cv_id,))
+            self.conn.execute("DELETE FROM user_cv WHERE id = ?", (cv_id,))
+            self.conn.commit()
+            return True
+        except sqlite3.Error:
+            return False
+
+    def get_all_cvs(self) -> List[Dict]:
+        """Get all CVs."""
+        cursor = self.conn.execute("SELECT * FROM user_cv ORDER BY created_at DESC")
+        return [dict(row) for row in cursor.fetchall()]
+
+    # ==================== Voice Profile Methods ====================
+
+    def save_voice_profile(self, profile: Dict) -> int:
+        """Save or update the voice profile."""
+        # Check if a profile exists
+        existing = self.get_active_voice_profile()
+
+        if existing:
+            # Update existing
+            self.conn.execute("""
+                UPDATE voice_profile SET
+                    achievement_example = ?,
+                    problem_solved = ?,
+                    why_interested = ?,
+                    strengths_description = ?,
+                    collaboration_style = ?,
+                    tone = ?,
+                    formality = ?,
+                    avoid_phrases = ?
+                WHERE id = ?
+            """, (
+                profile.get('achievement_example', ''),
+                profile.get('problem_solved', ''),
+                profile.get('why_interested', ''),
+                profile.get('strengths_description', ''),
+                profile.get('collaboration_style', ''),
+                profile.get('tone', 'professional'),
+                profile.get('formality', 'formal'),
+                profile.get('avoid_phrases', ''),
+                existing['id']
+            ))
+            self.conn.commit()
+            return existing['id']
+        else:
+            # Insert new
+            cursor = self.conn.execute("""
+                INSERT INTO voice_profile
+                (achievement_example, problem_solved, why_interested, strengths_description,
+                 collaboration_style, tone, formality, avoid_phrases, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """, (
+                profile.get('achievement_example', ''),
+                profile.get('problem_solved', ''),
+                profile.get('why_interested', ''),
+                profile.get('strengths_description', ''),
+                profile.get('collaboration_style', ''),
+                profile.get('tone', 'professional'),
+                profile.get('formality', 'formal'),
+                profile.get('avoid_phrases', '')
+            ))
+            self.conn.commit()
+            return cursor.lastrowid
+
+    def get_active_voice_profile(self) -> Optional[Dict]:
+        """Get the active voice profile."""
+        cursor = self.conn.execute("SELECT * FROM voice_profile WHERE is_active = 1")
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    # ==================== Job Match Methods ====================
+
+    def save_job_match(self, cv_id: int, job_id: int, match_data: Dict) -> int:
+        """Save or update a job match result."""
+        try:
+            cursor = self.conn.execute("""
+                INSERT OR REPLACE INTO job_match
+                (cv_id, job_id, match_score, skills_matched, skills_missing,
+                 recommendation, analysis, tailoring_tips)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cv_id, job_id,
+                match_data.get('match_score', 0),
+                match_data.get('skills_matched', '[]'),
+                match_data.get('skills_missing', '[]'),
+                match_data.get('recommendation', ''),
+                match_data.get('analysis', ''),
+                match_data.get('tailoring_tips', '[]')
+            ))
+            self.conn.commit()
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            print(f"Error saving job match: {e}")
+            return 0
+
+    def get_job_match(self, cv_id: int, job_id: int) -> Optional[Dict]:
+        """Get a specific job match."""
+        cursor = self.conn.execute(
+            "SELECT * FROM job_match WHERE cv_id = ? AND job_id = ?",
+            (cv_id, job_id)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_match_results(self, cv_id: int, min_score: float = 0,
+                          recommendation: str = None, limit: int = 100) -> List[Dict]:
+        """Get match results with job details."""
+        query = """
+            SELECT jm.*, j.title, j.company, j.location, j.salary, j.url, j.source
+            FROM job_match jm
+            JOIN jobs j ON jm.job_id = j.id
+            WHERE jm.cv_id = ? AND jm.match_score >= ?
+        """
+        params = [cv_id, min_score]
+
+        if recommendation:
+            query += " AND jm.recommendation = ?"
+            params.append(recommendation)
+
+        query += " ORDER BY jm.match_score DESC LIMIT ?"
+        params.append(limit)
+
+        cursor = self.conn.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_unmatched_jobs(self, cv_id: int, limit: int = 100) -> List[Dict]:
+        """Get jobs that haven't been matched against the CV yet."""
+        cursor = self.conn.execute("""
+            SELECT j.* FROM jobs j
+            LEFT JOIN job_match jm ON j.id = jm.job_id AND jm.cv_id = ?
+            WHERE jm.id IS NULL
+            AND j.has_full_description = 1
+            AND (j.is_expired = 0 OR j.is_expired IS NULL)
+            ORDER BY j.scraped_at DESC
+            LIMIT ?
+        """, (cv_id, limit))
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_match_stats(self, cv_id: int) -> Dict:
+        """Get statistics about job matches."""
+        cursor = self.conn.execute("""
+            SELECT
+                COUNT(*) as total,
+                COUNT(CASE WHEN recommendation = 'Apply' THEN 1 END) as apply_count,
+                COUNT(CASE WHEN recommendation = 'Consider' THEN 1 END) as consider_count,
+                COUNT(CASE WHEN recommendation = 'Skip' THEN 1 END) as skip_count,
+                AVG(match_score) as avg_score
+            FROM job_match WHERE cv_id = ?
+        """, (cv_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else {}
+
+    # ==================== Generated Document Methods ====================
+
+    def save_generated_document(self, job_id: int, cv_id: int, doc_type: str,
+                                 filename: str, file_path: str) -> int:
+        """Save a generated document record."""
+        cursor = self.conn.execute("""
+            INSERT INTO generated_document (job_id, cv_id, doc_type, filename, file_path)
+            VALUES (?, ?, ?, ?, ?)
+        """, (job_id, cv_id, doc_type, filename, file_path))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_generated_documents(self, job_id: int = None) -> List[Dict]:
+        """Get generated documents, optionally filtered by job."""
+        if job_id:
+            cursor = self.conn.execute("""
+                SELECT gd.*, j.title, j.company
+                FROM generated_document gd
+                JOIN jobs j ON gd.job_id = j.id
+                WHERE gd.job_id = ?
+                ORDER BY gd.created_at DESC
+            """, (job_id,))
+        else:
+            cursor = self.conn.execute("""
+                SELECT gd.*, j.title, j.company
+                FROM generated_document gd
+                JOIN jobs j ON gd.job_id = j.id
+                ORDER BY gd.created_at DESC
+            """)
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_document(self, doc_id: int) -> Optional[Dict]:
+        """Get a specific document by ID."""
+        cursor = self.conn.execute(
+            "SELECT * FROM generated_document WHERE id = ?",
+            (doc_id,)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def delete_document(self, doc_id: int) -> bool:
+        """Delete a generated document."""
+        try:
+            self.conn.execute("DELETE FROM generated_document WHERE id = ?", (doc_id,))
+            self.conn.commit()
+            return True
+        except sqlite3.Error:
             return False
 
     def close(self):

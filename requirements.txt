@@ -22,3 +22,6 @@ python-dotenv==1.0.0
 
 # LLM Integration (NVIDIA NIM)
 openai>=1.0.0
+
+# Document Generation
+python-docx>=0.8.11

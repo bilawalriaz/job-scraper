@@ -199,3 +199,153 @@ export async function runSchedulerTask(taskName) {
         method: 'POST',
     });
 }
+
+// =============================================================================
+// CV MANAGEMENT API
+// =============================================================================
+
+/**
+ * Upload a CV file (DOCX)
+ */
+export async function uploadCV(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE}/cv/upload`, {
+        method: 'POST',
+        body: formData,
+    });
+
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(error.error || 'Upload failed');
+    }
+
+    return response.json();
+}
+
+/**
+ * Get the active CV
+ */
+export async function getCV() {
+    return fetchAPI('/cv');
+}
+
+/**
+ * Delete a CV
+ */
+export async function deleteCV(cvId) {
+    return fetchAPI(`/cv/${cvId}`, {
+        method: 'DELETE',
+    });
+}
+
+// =============================================================================
+// VOICE PROFILE API
+// =============================================================================
+
+/**
+ * Get the active voice profile
+ */
+export async function getVoiceProfile() {
+    return fetchAPI('/voice-profile');
+}
+
+/**
+ * Save or update the voice profile
+ */
+export async function saveVoiceProfile(data) {
+    return fetchAPI('/voice-profile', {
+        method: 'POST',
+        body: JSON.stringify(data),
+    });
+}
+
+// =============================================================================
+// JOB MATCHING API
+// =============================================================================
+
+/**
+ * Match CV against a specific job
+ */
+export async function matchJobToCV(jobId) {
+    return fetchAPI(`/match/job/${jobId}`, {
+        method: 'POST',
+    });
+}
+
+/**
+ * Batch match CV against multiple jobs
+ */
+export async function batchMatchJobs(options = {}) {
+    return fetchAPI('/match/analyze', {
+        method: 'POST',
+        body: JSON.stringify(options),
+    });
+}
+
+/**
+ * Get match results for the active CV
+ */
+export async function getMatchResults(filters = {}) {
+    const query = new URLSearchParams();
+    if (filters.min_score) query.set('min_score', filters.min_score);
+    if (filters.recommendation) query.set('recommendation', filters.recommendation);
+    if (filters.limit) query.set('limit', filters.limit);
+
+    const queryString = query.toString();
+    return fetchAPI(`/match/results${queryString ? `?${queryString}` : ''}`);
+}
+
+/**
+ * Get match result for a specific job
+ */
+export async function getJobMatch(jobId) {
+    return fetchAPI(`/match/job/${jobId}`);
+}
+
+// =============================================================================
+// DOCUMENT GENERATION API
+// =============================================================================
+
+/**
+ * Generate tailored CV for a job
+ */
+export async function generateCV(jobId) {
+    return fetchAPI(`/generate/cv/${jobId}`, {
+        method: 'POST',
+    });
+}
+
+/**
+ * Generate cover letter for a job
+ */
+export async function generateCoverLetter(jobId) {
+    return fetchAPI(`/generate/cover-letter/${jobId}`, {
+        method: 'POST',
+    });
+}
+
+/**
+ * Get all generated documents
+ */
+export async function getDocuments(jobId = null) {
+    const query = jobId ? `?job_id=${jobId}` : '';
+    return fetchAPI(`/documents${query}`);
+}
+
+/**
+ * Download a generated document
+ */
+export function downloadDocument(docId) {
+    window.open(`${API_BASE}/documents/${docId}/download`, '_blank');
+}
+
+/**
+ * Delete a generated document
+ */
+export async function deleteDocument(docId) {
+    return fetchAPI(`/documents/${docId}`, {
+        method: 'DELETE',
+    });
+}

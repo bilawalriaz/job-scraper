@@ -16,11 +16,20 @@ function Layout() {
                         <NavLink to="/jobs" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
                             Jobs
                         </NavLink>
+                        <NavLink to="/matching" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                            Matching
+                        </NavLink>
+                        <NavLink to="/cv" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                            My CV
+                        </NavLink>
+                        <NavLink to="/voice" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                            Voice
+                        </NavLink>
+                        <NavLink to="/documents" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                            Documents
+                        </NavLink>
                         <NavLink to="/configs" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
                             Searches
-                        </NavLink>
-                        <NavLink to="/logs" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-                            Logs
                         </NavLink>
                     </nav>
                 </header>

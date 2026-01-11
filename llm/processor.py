@@ -160,43 +160,41 @@ Respond ONLY with valid JSON, no markdown code blocks or other text."""
             api_key=api_key
         )
 
-    def _call_llm(self, description: str, job_title: str, company: str) -> Optional[Dict]:
-        """Call the LLM API with rate limiting and key rotation."""
-        # Wait for available key
+    def _wait_for_key(self) -> Optional[Tuple[str, str]]:
+        """Wait for an available API key with rate limiting."""
         max_wait_time = 120  # Max 2 minutes wait
         total_waited = 0
 
         while total_waited < max_wait_time:
             result = self.key_rotator.get_available_key()
             if result:
-                api_key, key_name = result
-                break
+                return result
 
             wait_time = min(self.key_rotator.get_wait_time(), 0.5)  # Quick retry
             if wait_time > 0.1:
                 print(f"[LLM] Rate limited, waiting {wait_time:.1f}s...")
             time.sleep(wait_time)
             total_waited += wait_time
-        else:
-            print("[LLM] Timeout waiting for available API key")
+
+        print("[LLM] Timeout waiting for available API key")
+        return None
+
+    def _call_llm_raw(self, system_prompt: str, user_prompt: str,
+                      label: str = "request") -> Optional[str]:
+        """Call LLM with arbitrary prompts and return raw response text."""
+        key_result = self._wait_for_key()
+        if not key_result:
             return None
 
-        print(f"[LLM] Using {key_name} for: {job_title[:50]}...")
-
-        user_prompt = f"""Process this job description:
-
-Job Title: {job_title}
-Company: {company}
-
-Description:
-{description}"""
+        api_key, key_name = key_result
+        print(f"[LLM] Using {key_name} for: {label[:50]}...")
 
         try:
             client = self._create_client(api_key)
             completion = client.chat.completions.create(
                 model=self.MODEL,
                 messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.3,
@@ -211,26 +209,48 @@ Description:
                 if chunk.choices[0].delta.content:
                     full_response += chunk.choices[0].delta.content
 
-            # Parse JSON response
-            try:
-                # Clean up response - remove any markdown code blocks
-                response_text = full_response.strip()
-                if response_text.startswith("```"):
-                    response_text = response_text.split("```")[1]
-                    if response_text.startswith("json"):
-                        response_text = response_text[4:]
-                response_text = response_text.strip()
-
-                result = json.loads(response_text)
-                return result
-            except json.JSONDecodeError as e:
-                print(f"[LLM] Failed to parse JSON response: {e}")
-                print(f"[LLM] Response was: {full_response[:500]}...")
-                return None
+            return full_response.strip()
 
         except Exception as e:
             print(f"[LLM] API error: {e}")
             return None
+
+    def _parse_json_response(self, response: str) -> Optional[Dict]:
+        """Parse JSON from LLM response, handling markdown code blocks."""
+        if not response:
+            return None
+
+        try:
+            response_text = response.strip()
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+            response_text = response_text.strip()
+
+            return json.loads(response_text)
+        except json.JSONDecodeError as e:
+            print(f"[LLM] Failed to parse JSON response: {e}")
+            print(f"[LLM] Response was: {response[:500]}...")
+            return None
+
+    def _call_llm_with_prompt(self, prompt: str, label: str = "request") -> Optional[str]:
+        """Call LLM with a single prompt (system prompt embedded in user prompt)."""
+        system = "You are a helpful assistant that responds only with valid JSON."
+        return self._call_llm_raw(system, prompt, label)
+
+    def _call_llm(self, description: str, job_title: str, company: str) -> Optional[Dict]:
+        """Call the LLM API for job processing with rate limiting and key rotation."""
+        user_prompt = f"""Process this job description:
+
+Job Title: {job_title}
+Company: {company}
+
+Description:
+{description}"""
+
+        response = self._call_llm_raw(self.SYSTEM_PROMPT, user_prompt, job_title)
+        return self._parse_json_response(response)
 
     def process_job(self, job: Dict) -> Optional[Dict]:
         """Process a single job and return LLM results."""
@@ -299,6 +319,108 @@ Description:
     def get_rate_limit_status(self) -> Dict:
         """Get current rate limit status."""
         return self.key_rotator.get_status()
+
+    # ==================== CV/Matching Methods ====================
+
+    def parse_cv(self, cv_text: str) -> Optional[Dict]:
+        """Parse CV text and extract structured data."""
+        from llm.prompts import CV_PARSE_PROMPT
+
+        prompt = CV_PARSE_PROMPT.format(cv_text=cv_text)
+        response = self._call_llm_with_prompt(prompt, "CV parsing")
+        return self._parse_json_response(response)
+
+    def match_cv_to_job(self, cv_data: Dict, job: Dict) -> Optional[Dict]:
+        """Match CV against a job and return analysis."""
+        from llm.prompts import JOB_MATCH_PROMPT, format_cv_for_matching
+
+        cv_summary = format_cv_for_matching(cv_data)
+
+        prompt = JOB_MATCH_PROMPT.format(
+            cv_summary=cv_summary,
+            job_title=job.get('title', 'Unknown'),
+            company=job.get('company', 'Unknown'),
+            location=job.get('location', 'Unknown'),
+            salary=job.get('salary', 'Not specified'),
+            job_description=job.get('description', '')[:4000]  # Limit length
+        )
+
+        response = self._call_llm_with_prompt(prompt, f"Matching: {job.get('title', '')[:30]}")
+        return self._parse_json_response(response)
+
+    def tailor_cv(self, cv_data: Dict, job: Dict, voice_profile: Dict = None) -> Optional[Dict]:
+        """Generate tailored CV content for a specific job."""
+        from llm.prompts import CV_TAILOR_PROMPT, format_cv_for_matching
+
+        original_content = format_cv_for_matching(cv_data)
+
+        # Extract key requirements from job description
+        requirements = job.get('description', '')[:2000]
+
+        # Voice profile settings
+        vp = voice_profile or {}
+
+        prompt = CV_TAILOR_PROMPT.format(
+            original_content=original_content,
+            job_title=job.get('title', 'Unknown'),
+            company=job.get('company', 'Unknown'),
+            requirements=requirements,
+            achievement_style=vp.get('achievement_example', 'Not specified'),
+            tone=vp.get('tone', 'professional'),
+            formality=vp.get('formality', 'formal'),
+            avoid_phrases=vp.get('avoid_phrases', '[]')
+        )
+
+        response = self._call_llm_with_prompt(prompt, f"Tailoring CV for: {job.get('company', '')[:30]}")
+        return self._parse_json_response(response)
+
+    def generate_cover_letter(self, cv_data: Dict, job: Dict, voice_profile: Dict = None) -> Optional[Dict]:
+        """Generate a cover letter for a job application."""
+        from llm.prompts import COVER_LETTER_PROMPT
+
+        personal = cv_data.get('personal_info', {})
+        skills = cv_data.get('skills', {})
+        experience = cv_data.get('experience', [])
+
+        # Format skills
+        all_skills = []
+        if isinstance(skills, dict):
+            all_skills = skills.get('technical', [])[:10]
+        elif isinstance(skills, list):
+            all_skills = skills[:10]
+        skills_str = ', '.join(all_skills) if all_skills else 'Various technical skills'
+
+        # Format recent experience
+        exp_str = ""
+        if experience:
+            for exp in experience[:2]:
+                exp_str += f"\n- {exp.get('title', '')} at {exp.get('company', '')}"
+                achievements = exp.get('achievements', [])[:2]
+                for ach in achievements:
+                    exp_str += f"\n  * {ach}"
+
+        # Voice profile settings
+        vp = voice_profile or {}
+
+        prompt = COVER_LETTER_PROMPT.format(
+            name=personal.get('name', 'Candidate'),
+            summary=cv_data.get('summary', 'Experienced professional'),
+            skills=skills_str,
+            experience=exp_str or 'Relevant industry experience',
+            job_title=job.get('title', 'the position'),
+            company=job.get('company', 'your company'),
+            location=job.get('location', ''),
+            requirements=job.get('description', '')[:2000],
+            achievement_example=vp.get('achievement_example', 'Not provided - use professional style'),
+            problem_solved=vp.get('problem_solved', 'Not provided'),
+            why_interested=vp.get('why_interested', 'Seeking new challenges and growth'),
+            tone=vp.get('tone', 'professional'),
+            formality=vp.get('formality', 'formal'),
+            avoid_phrases=vp.get('avoid_phrases', '[]')
+        )
+
+        response = self._call_llm_with_prompt(prompt, f"Cover letter for: {job.get('company', '')[:30]}")
+        return self._parse_json_response(response)
 
 
 # Singleton instance
